@@ -4,6 +4,7 @@ import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import FinanceDataReader as fdr
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="추세전환/사이클 차트", layout="wide")
 st.title("추세전환 / 추세사이클 차트")
@@ -11,7 +12,7 @@ st.title("추세전환 / 추세사이클 차트")
 c1, c2, c3 = st.columns(3)
 code = c1.text_input("종목코드", "278530")
 disp = c2.number_input("화면 표시 기간(거래일)", 60, 600, 120, 10)
-calc = c3.number_input("계산 기간(거래일) - 직선/곡선 계산에 사용", 120, 2000, 720, 50,
+calc = c3.number_input("계산 기간(거래일) - 직선/곡선 계산에 사용", 120, 2000, 500, 50,
                        help="클수록 긴 과거로 추세를 계산합니다. 직선추세 기울기를 맞출 때 조절하세요.")
 
 c4, c5, c6 = st.columns(3)
@@ -129,23 +130,66 @@ def base_traces(fig):
     fig.add_trace(go.Scatter(x=dates, y=lov, name="곡선추세하한", line=dict(color="navy", width=1)), row=1, col=1)
 
 
+CROSSHAIR_JS = """
+function installCrosshair(gd){
+  gd.style.position='relative';
+  function mk(css){var d=document.createElement('div');
+    d.style.cssText='position:absolute;pointer-events:none;display:none;z-index:50;'+css;
+    gd.appendChild(d);return d;}
+  var lab='background:#222;color:#fff;font:12px sans-serif;padding:2px 5px;white-space:nowrap;';
+  var vl=mk('width:0;border-left:1px solid #333;');
+  var hl=mk('height:0;border-top:1px solid #333;');
+  var dl=mk(lab+'transform:translateX(-50%);');
+  var pl=mk(lab+'width:52px;text-align:right;transform:translateY(-50%);');
+  var pr=mk(lab+'width:52px;transform:translateY(-50%);');
+  function hide(){[vl,hl,dl,pl,pr].forEach(function(e){e.style.display='none';});}
+  function move(cx,cy){
+    var r=gd.getBoundingClientRect(), x=cx-r.left, y=cy-r.top;
+    var fl=gd._fullLayout, s=fl._size, xa=fl.xaxis, ya=fl.yaxis, yb=fl.yaxis2;
+    if(x<s.l||x>s.l+s.w||y<s.t||y>s.t+s.h){hide();return;}
+    var cats=gd.data[0].x, n=cats.length, lo=xa.range[0], hi=xa.range[1];
+    var idx=Math.round((x-xa._offset)/xa._length*(hi-lo)+lo);
+    idx=Math.max(0,Math.min(n-1,idx));
+    var xs=xa._offset+(idx-lo)/(hi-lo)*xa._length;
+    var ax=(y>=yb._offset)?yb:ya;
+    var v=ax.range[1]-(y-ax._offset)/ax._length*(ax.range[1]-ax.range[0]);
+    var txt=Math.round(v).toLocaleString('en-US');
+    vl.style.cssText+=';display:block;left:'+xs+'px;top:'+s.t+'px;height:'+s.h+'px;';
+    hl.style.cssText+=';display:block;left:'+s.l+'px;top:'+y+'px;width:'+s.w+'px;';
+    dl.style.display='block'; dl.style.left=xs+'px'; dl.style.top=(s.t+s.h+2)+'px'; dl.textContent=cats[idx];
+    pl.style.display='block'; pl.style.left=(s.l-54)+'px'; pl.style.top=y+'px'; pl.textContent=txt;
+    pr.style.display='block'; pr.style.left=(s.l+s.w+2)+'px'; pr.style.top=y+'px'; pr.textContent=txt;
+  }
+  gd.addEventListener('mousemove',function(e){move(e.clientX,e.clientY);});
+  gd.addEventListener('mouseleave',hide);
+  gd.addEventListener('touchstart',function(e){var t=e.touches[0];move(t.clientX,t.clientY);},{passive:true});
+  gd.addEventListener('touchmove',function(e){var t=e.touches[0];move(t.clientX,t.clientY);},{passive:true});
+}
+"""
+
+
 def finish(fig):
     fig.update_xaxes(type="category", nticks=8)
-    # 십자선(마우스 위치를 따라다니는 가로·세로선) + 날짜별 값 한꺼번에 표시
-    fig.update_xaxes(showspikes=True, spikemode="across", spikesnap="cursor",
-                     spikethickness=1, spikedash="dot", spikecolor="gray")
-    fig.update_yaxes(showspikes=True, spikemode="across", spikesnap="cursor",
-                     spikethickness=1, spikedash="dot", spikecolor="gray")
-    # 값 표시는 수정종가(가격)만
-    for tr in fig.data:
-        if tr.name == "수정종가":
-            tr.hovertemplate = "%{y:,.0f}"
-        else:
-            tr.hoverinfo = "skip"
-    fig.update_layout(height=700, margin=dict(l=10, r=10, t=30, b=10),
-                      legend=dict(orientation="h", y=1.06), bargap=0.05,
-                      hovermode="x unified")
+    fig.update_yaxes(tickformat=",.0f")
+    # 오른쪽에도 가격 눈금 표시용(보이지 않는 점 하나)
+    fig.add_trace(go.Scatter(x=[dates[0]], y=[yv[0]], xaxis="x", yaxis="y3",
+                             mode="markers", marker=dict(opacity=0), showlegend=False,
+                             hoverinfo="skip"))
+    fig.update_layout(
+        yaxis3=dict(overlaying="y", side="right", matches="y", showgrid=False, tickformat=",.0f"),
+        height=700, margin=dict(l=64, r=64, t=30, b=44),
+        legend=dict(orientation="h", y=1.06), bargap=0.05,
+        hovermode=False, dragmode=False)
     return fig
+
+
+def show(fig, div_id):
+    """십자선(가로=가격, 세로=날짜)을 얹어 차트를 표시"""
+    html = "<script>" + CROSSHAIR_JS + "</script>" + fig.to_html(
+        full_html=False, include_plotlyjs="cdn", div_id=div_id,
+        config={"displayModeBar": False, "responsive": True, "scrollZoom": False},
+        post_script="installCrosshair(document.getElementById('{plot_id}'));")
+    components.html(html, height=720)
 
 
 tab1, tab2 = st.tabs(["추세전환차트", "추세사이클차트"])
@@ -156,7 +200,7 @@ with tab1:
     cv = curvev - curvev.min()
     fig.add_trace(go.Bar(x=dates, y=cv, marker_color=direction_colors(curvev),
                          name="곡선추세 방향", showlegend=False), row=2, col=1)
-    st.plotly_chart(finish(fig), use_container_width=True)
+    show(finish(fig), "chart_trend")
     st.caption("하단 봉: 곡선추세가 상승 중이면 빨강, 하락 중이면 파랑 (추세 전환 시점 확인용)")
 
 with tab2:
@@ -166,7 +210,7 @@ with tab2:
     base_traces(fig2)
     fig2.add_trace(go.Bar(x=dates, y=cyc, marker_color=direction_colors(cyc),
                           name="싸이클", showlegend=False), row=2, col=1)
-    st.plotly_chart(finish(fig2), use_container_width=True)
+    show(finish(fig2), "chart_cycle")
     st.caption(f"추정 최적 주기 약 {P:.1f}거래일 · 잔차 설명력(R²) {r2 * 100:.0f}%. "
                "싸이클의 상승/하락은 추세의 상승/하락과 무관하며, 추세선보다 설명력이 낮은 보조 지표입니다.")
 
