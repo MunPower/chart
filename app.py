@@ -123,7 +123,7 @@ def direction_colors(v):
 
 
 def base_traces(fig):
-    fig.add_trace(go.Scatter(x=dates, y=yv, name="수정종가", line=dict(color="red", width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=dates, y=yv, name="수정종가", line=dict(color="red", width=2)), row=1, col=1)
     fig.add_trace(go.Scatter(x=dates, y=linev, name="직선추세", line=dict(color="magenta", width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=dates, y=curvev, name="곡선추세", line=dict(color="royalblue", width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=dates, y=upv, name="곡선추세상한", line=dict(color="navy", width=1)), row=1, col=1)
@@ -136,12 +136,12 @@ function installCrosshair(gd){
   function mk(css){var d=document.createElement('div');
     d.style.cssText='position:absolute;pointer-events:none;display:none;z-index:50;'+css;
     gd.appendChild(d);return d;}
-  var lab='background:#222;color:#fff;font:12px sans-serif;padding:2px 5px;white-space:nowrap;';
+  var lab='background:#222;color:#fff;font:11px sans-serif;padding:2px 3px;white-space:nowrap;';
   var vl=mk('width:0;border-left:1px solid #333;');
   var hl=mk('height:0;border-top:1px solid #333;');
   var dl=mk(lab+'transform:translateX(-50%);');
-  var pl=mk(lab+'width:52px;text-align:right;transform:translateY(-50%);');
-  var pr=mk(lab+'width:52px;transform:translateY(-50%);');
+  var pl=mk(lab+'width:44px;text-align:right;transform:translateY(-50%);');
+  var pr=mk(lab+'width:44px;transform:translateY(-50%);');
   function hide(){[vl,hl,dl,pl,pr].forEach(function(e){e.style.display='none';});}
   function move(cx,cy){
     var r=gd.getBoundingClientRect(), x=cx-r.left, y=cy-r.top;
@@ -157,7 +157,7 @@ function installCrosshair(gd){
     vl.style.cssText+=';display:block;left:'+xs+'px;top:'+s.t+'px;height:'+s.h+'px;';
     hl.style.cssText+=';display:block;left:'+s.l+'px;top:'+y+'px;width:'+s.w+'px;';
     dl.style.display='block'; dl.style.left=xs+'px'; dl.style.top=(s.t+s.h+2)+'px'; dl.textContent=cats[idx];
-    pl.style.display='block'; pl.style.left=(s.l-54)+'px'; pl.style.top=y+'px'; pl.textContent=txt;
+    pl.style.display='block'; pl.style.left=(s.l-46)+'px'; pl.style.top=y+'px'; pl.textContent=txt;
     pr.style.display='block'; pr.style.left=(s.l+s.w+2)+'px'; pr.style.top=y+'px'; pr.textContent=txt;
   }
   gd.addEventListener('mousemove',function(e){move(e.clientX,e.clientY);});
@@ -169,16 +169,20 @@ function installCrosshair(gd){
 
 
 def finish(fig):
-    fig.update_xaxes(type="category", nticks=8)
-    fig.update_yaxes(tickformat=",.0f")
+    pos = np.linspace(0, len(dates) - 1, 5).round().astype(int)
+    fig.update_xaxes(type="category", tickmode="array",
+                     tickvals=[dates[i] for i in pos],
+                     ticktext=[pd.to_datetime(dates[i]).strftime("%y-%m-%d") for i in pos],
+                     tickangle=0, tickfont=dict(size=10))
+    fig.update_yaxes(tickformat=",.0f", tickfont=dict(size=10))
     # 오른쪽에도 가격 눈금 표시용(보이지 않는 점 하나)
     fig.add_trace(go.Scatter(x=[dates[0]], y=[yv[0]], xaxis="x", yaxis="y3",
                              mode="markers", marker=dict(opacity=0), showlegend=False,
                              hoverinfo="skip"))
     fig.update_layout(
         yaxis3=dict(overlaying="y", side="right", matches="y", showgrid=False, tickformat=",.0f"),
-        height=700, margin=dict(l=64, r=64, t=30, b=44),
-        legend=dict(orientation="h", y=1.06), bargap=0.05,
+        height=640, margin=dict(l=50, r=50, t=16, b=40),
+        showlegend=False, bargap=0.05,
         hovermode=False, dragmode=False)
     return fig
 
@@ -189,8 +193,16 @@ def show(fig, div_id):
         full_html=False, include_plotlyjs="cdn", div_id=div_id,
         config={"displayModeBar": False, "responsive": True, "scrollZoom": False},
         post_script="installCrosshair(document.getElementById('{plot_id}'));")
-    components.html(html, height=720)
+    components.html(html, height=660)
 
+
+st.markdown(
+    '<div style="font-size:13px;line-height:1.8">'
+    '<span style="color:red">━ 수정종가</span> &nbsp; '
+    '<span style="color:magenta">━ 직선추세</span> &nbsp; '
+    '<span style="color:royalblue">━ 곡선추세</span> &nbsp; '
+    '<span style="color:navy">━ 상한·하한</span></div>',
+    unsafe_allow_html=True)
 
 tab1, tab2 = st.tabs(["추세전환차트", "추세사이클차트"])
 
