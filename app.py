@@ -10,8 +10,8 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="추세전환/사이클 차트", layout="wide", initial_sidebar_state="collapsed")
 st.markdown("""<style>
-.block-container{padding:0.6rem 0.4rem 1rem 0.4rem;max-width:100%;}
-[data-testid="stToolbar"],footer{display:none !important;}
+.block-container{padding:0.8rem 0.4rem 1rem 0.4rem;max-width:100%;}
+header,[data-testid="stHeader"],[data-testid="stToolbar"],[data-testid="stDecoration"],footer{display:none !important;}
 </style>""", unsafe_allow_html=True)
 
 # ───────────── 차트 계산 설정(고정값) ─────────────
