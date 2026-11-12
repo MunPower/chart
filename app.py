@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import FinanceDataReader as fdr
 import json
+import html
 import streamlit.components.v1 as components
 
 st.set_page_config(page_title="추세전환/사이클 차트", layout="wide", initial_sidebar_state="collapsed")
@@ -13,21 +14,60 @@ st.markdown("""<style>
 [data-testid="stToolbar"],footer{display:none !important;}
 </style>""", unsafe_allow_html=True)
 
-# ───────────── 설정 (평소에는 접어 둠) ─────────────
-with st.expander("⚙️ 설정", expanded=False):
-    c1, c2, c3 = st.columns(3)
-    code = c1.text_input("종목코드", "278530")
-    disp = c2.number_input("보이는 기간(거래일, 60~120)", 60, 120, 120, 10,
-                           help="처음 열 때 보이는 기간입니다. 차트에서 두 손가락으로 벌리거나 ＋/－ 버튼으로 20~120일까지 조절할 수 있습니다.")
-    calc = c3.number_input("계산 기간(거래일)", 120, 2000, 720, 50,
-                           help="직선/곡선 계산에 쓰는 기간. 직선추세 기울기를 맞출 때 조절하세요.")
-    c4, c5, c6 = st.columns(3)
-    lam = c4.select_slider("HP필터 λ (클수록 곡선이 완만)",
-                           options=[5e3, 6e3, 7e3, 8e3, 9e3, 1e4, 2e4, 5e4, 1e5, 3e5, 1e6], value=8e3,
-                           format_func=lambda v: f"{v:,.0f}")
-    kmul = c5.slider("상·하한 폭 (σ 배수, 90%=1.645)", 0.5, 3.0, 1.4, 0.005)
-    band_pct = c6.number_input("상·하한 폭 직접 지정(%) · 0이면 σ방식", 0.0, 30.0, 0.0, 0.1)
+# ───────────── 차트 계산 설정(고정값) ─────────────
+disp, calc, lam, kmul, band_pct = 120, 500, 1e4, 1.4, 0.0
 
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def listing() -> pd.DataFrame:
+    """종목명 검색용 목록 (주식 + ETF)"""
+    frames = []
+    for market in ("KRX", "ETF/KR"):
+        try:
+            d = fdr.StockListing(market)
+            cc = "Code" if "Code" in d.columns else "Symbol"
+            frames.append(d[[cc, "Name"]].rename(columns={cc: "Code"}))
+        except Exception:
+            pass
+    if not frames:
+        return pd.DataFrame(columns=["Code", "Name"])
+    out = pd.concat(frames).dropna().drop_duplicates("Code")
+    out["Code"] = out["Code"].astype(str)
+    return out.reset_index(drop=True)
+
+
+# ───────────── 종목 이름 + 검색 ─────────────
+lst = listing()
+names = dict(zip(lst["Code"], lst["Name"]))
+if "code" not in st.session_state:
+    st.session_state.code = "278530"
+
+name_ph = st.empty()
+q = st.text_input("종목 검색", placeholder="🔍 종목코드 또는 종목명 (예: 278530, 삼성전자)",
+                  label_visibility="collapsed").strip()
+if q:
+    qu = q.upper()
+    if qu in names or (len(q) == 6 and q.isdigit()):
+        st.session_state.code = qu
+    elif lst.empty:
+        st.caption("종목 목록을 불러오지 못했습니다. 6자리 종목코드로 검색해 주세요.")
+    else:
+        m = lst[lst["Name"].str.contains(q, case=False, regex=False) | lst["Code"].str.startswith(qu)]
+        if m.empty:
+            st.caption("검색 결과가 없습니다.")
+        else:
+            m = m.assign(_l=m["Name"].str.len()).sort_values("_l").head(20)
+            opts = [f"{r.Name} ({r.Code})" for r in m.itertuples()]
+            sel = st.selectbox("검색 결과", opts, index=None, placeholder="검색 결과에서 선택",
+                               label_visibility="collapsed")
+            if sel:
+                st.session_state.code = sel.rsplit("(", 1)[1].rstrip(")")
+code = st.session_state.code
+name = names.get(code, code)
+name_ph.markdown(
+    f'<div style="font-size:20px;font-weight:700;line-height:1.3">{html.escape(str(name))} '
+    f'<span style="font-size:13px;color:#888;font-weight:400">{html.escape(code)}</span></div>',
+    unsafe_allow_html=True)
 
 @st.cache_data(ttl=600)
 def load(code: str, days: int) -> pd.DataFrame:
@@ -105,28 +145,8 @@ st.markdown(
     f'<span style="font-size:42px;font-weight:700;color:{col};line-height:1">{last:,.0f}</span>'
     f'<span style="font-size:17px;color:{col};padding-bottom:4px">{arrow} {abs(chg):,.0f} &nbsp; {pct:+.2f}%</span>'
     '</div>'
-    f'<div style="font-size:13px;color:#888;margin-top:4px">{code.strip()} · 거래량 {vol:,.0f}</div>'
-    f'<div style="font-size:12px;color:#888;margin-top:2px">직선추세 {linev[-init_span]:,.0f}→{linev[-1]:,.0f} · '
-    f'상한대비 {last / upper[-1] * 100:.1f}% · 하한대비 {last / lower[-1] * 100:.1f}% · 상·하한폭 ±{width * 100:.1f}%</div>',
+    f'<div style="font-size:13px;color:#888;margin-top:4px">거래량 {vol:,.0f}</div>',
     unsafe_allow_html=True)
-
-with st.expander("🔧 계산 기간 찾기 (증권사 직선추세 값에 맞추기)"):
-    t1, t2 = st.columns(2)
-    tgt0 = t1.number_input("증권사 직선추세 화면 시작값", value=30800, step=100)
-    tgt1 = t2.number_input("증권사 직선추세 화면 끝값", value=36000, step=100)
-    if st.button("가장 가까운 계산 기간 찾기"):
-        full = load(code.strip(), 2000)["Close"].to_numpy(dtype=float)
-        rows = []
-        for L in range(int(disp) + 20, len(full) + 1, 10):
-            yy = full[-L:]
-            sl_, c0_ = np.polyfit(np.arange(L), yy, 1)
-            a = c0_ + sl_ * (L - int(disp))
-            b = c0_ + sl_ * (L - 1)
-            rows.append((L, a, b, abs(a - tgt0) + abs(b - tgt1)))
-        res = pd.DataFrame(rows, columns=["계산기간", "직선 시작값", "직선 끝값", "오차"]).sort_values("오차").head(5)
-        st.dataframe(res.round(0).astype(int), hide_index=True)
-        st.caption("오차가 가장 작은 '계산기간'을 설정의 계산 기간에 넣어 보세요.")
-
 
 # ───────────── 차트 ─────────────
 def direction_colors(v):
@@ -145,7 +165,7 @@ def base_traces(fig):
 
 CROSSHAIR_JS = """
 function installCrosshair(gd, initSpan, S, B){
-  var LP_MS=500;          // 길게 눌러 진동이 오기까지의 시간(ms)
+  var LP_MS=1500;          // 길게 눌러 진동이 오기까지의 시간(ms)
   var CROSS_DELAY_MS=150;  // 진동 후 십자선이 나타나기까지의 시간(ms) (진동 → 십자선 순서 맞춤)
   var PAN_GAIN=1.5;        // 손가락 이동 속도 배율
   var ZOOM_GAIN=1.5;       // 확대/축소 속도 배율
