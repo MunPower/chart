@@ -145,7 +145,10 @@ def base_traces(fig):
 
 CROSSHAIR_JS = """
 function installCrosshair(gd, initSpan, S, B){
-  var LP_MS=1500;   // 길게 눌러 진동과 함께 십자선이 나오기까지의 시간(ms)
+  var LP_MS=1500;          // 길게 눌러 진동이 오기까지의 시간(ms)
+  var CROSS_DELAY_MS=150;  // 진동 후 십자선이 나타나기까지의 시간(ms) (진동 → 십자선 순서 맞춤)
+  var PAN_GAIN=1.5;        // 손가락 이동 속도 배율
+  var ZOOM_GAIN=1.5;       // 확대/축소 속도 배율
   // 브라우저(앱 브라우저)가 두 손가락으로 화면 전체를 확대하지 못하게 막기
   try{
     var pd=window.parent.document, mv=pd.querySelector('meta[name=viewport]');
@@ -163,6 +166,7 @@ function installCrosshair(gd, initSpan, S, B){
   function clampI0(v,sp){return Math.round(Math.max(0,Math.min(N-sp,v)));}
   var span=clampSpan(initSpan), i0=N-span;
   var pending=false, mode=null, timer=null, sx=0, sy=0, startI0=0, lastT=null, mdown=false, pinch=null, markersOn=null;
+  var tStart=0, lastTap=0, lastTouch=0;
 
   function mk(css){var d=document.createElement('div');
     d.style.cssText='position:absolute;pointer-events:none;display:none;z-index:50;'+css;
@@ -218,6 +222,9 @@ function installCrosshair(gd, initSpan, S, B){
     return Math.max(0,Math.min(1,(clientX-r.left-s.l)/s.w));
   }
   function dist(t){var dx=t[0].clientX-t[1].clientX, dy=t[0].clientY-t[1].clientY; return Math.sqrt(dx*dx+dy*dy);}
+  function resetView(){                       // 더블클릭/더블탭: 처음 상태로
+    span=clampSpan(initSpan); i0=N-span; pinch=null; if(mode==='cross')mode=null; hide(); schedule();
+  }
   function zoomBy(factor){                    // 화면 가운데 기준 확대/축소
     var c=i0+span/2, ns=clampSpan(span*factor);
     if(ns===span)ns=clampSpan(span+(factor<1?-1:1));
@@ -230,27 +237,31 @@ function installCrosshair(gd, initSpan, S, B){
     b.style.cssText='position:absolute;top:2px;right:'+right+'px;width:28px;height:22px;line-height:22px;text-align:center;'
       +'font:600 15px sans-serif;background:#f3f3f3;border:1px solid #ccc;border-radius:4px;z-index:60;cursor:pointer;'
       +'touch-action:manipulation;user-select:none;-webkit-user-select:none;';
-    ['touchstart','touchmove','touchend','mousedown','mousemove'].forEach(function(n){
+    ['touchstart','touchmove','touchend','mousedown','mousemove','dblclick'].forEach(function(n){
       b.addEventListener(n,function(e){e.stopPropagation();},{passive:true});});
     b.addEventListener('click',function(e){e.stopPropagation();fn();});
     gd.appendChild(b);
   }
-  btn('＋',92,function(){zoomBy(0.7);});
-  btn('－',62,function(){zoomBy(1/0.7);});
+  btn('＋',92,function(){zoomBy(0.6);});
+  btn('－',62,function(){zoomBy(1/0.6);});
 
   // ── 손가락 ──
   // 바로 좌우로 밀기=기간 이동(한 칸씩 딱딱하게) / 길게 눌러 진동=십자선 / 두 손가락=확대·축소
   gd.addEventListener('touchstart',function(e){
-    clearTimeout(timer);
+    clearTimeout(timer); lastTouch=Date.now();
     if(e.touches.length>=2){
       hide(); mode='pinch';
       pinch={d:dist(e.touches),span:span,anchor:i0+fracOf((e.touches[0].clientX+e.touches[1].clientX)/2)*span};
       return;
     }
     hide();
-    var t=e.touches[0]; lastT=t; sx=t.clientX; sy=t.clientY; startI0=i0; mode=null;
+    var t=e.touches[0]; lastT=t; sx=t.clientX; sy=t.clientY; startI0=i0; mode=null; tStart=Date.now();
     timer=setTimeout(function(){
-      if(mode===null){mode='cross'; if(navigator.vibrate)navigator.vibrate(30); move(lastT.clientX,lastT.clientY);}
+      if(mode!==null)return;
+      mode='arming'; if(navigator.vibrate)navigator.vibrate(40);       // ① 진동
+      timer=setTimeout(function(){                                      // ② 잠깐 뒤 십자선 표시 후 따라다님
+        if(mode==='arming'){mode='cross'; move(lastT.clientX,lastT.clientY);}
+      },CROSS_DELAY_MS);
     },LP_MS);
   },{passive:true});
   gd.addEventListener('touchmove',function(e){
@@ -258,27 +269,32 @@ function installCrosshair(gd, initSpan, S, B){
       if(e.touches.length===2&&pinch){
         e.preventDefault();
         var f=fracOf((e.touches[0].clientX+e.touches[1].clientX)/2);
-        var ns=clampSpan(pinch.span*pinch.d/dist(e.touches));
+        var ns=clampSpan(pinch.span*Math.pow(pinch.d/dist(e.touches),ZOOM_GAIN));
         span=ns; i0=clampI0(pinch.anchor-f*ns,ns); schedule();
       }
       return;
     }
     if(e.touches.length!==1)return;
     var t=e.touches[0]; lastT=t;
+    if(mode==='arming'){e.preventDefault(); return;}
     if(mode==='cross'){e.preventDefault(); move(t.clientX,t.clientY); return;}
-    if(mode==='pan'){e.preventDefault(); i0=clampI0(startI0-pxToBars(t.clientX-sx),span); schedule(); return;}
+    if(mode==='pan'){e.preventDefault(); i0=clampI0(startI0-pxToBars(t.clientX-sx)*PAN_GAIN,span); schedule(); return;}
     if(mode==='scroll')return;
     var dx=t.clientX-sx, dy=t.clientY-sy;
     if(Math.abs(dx)>6||Math.abs(dy)>6){
       clearTimeout(timer);
-      if(Math.abs(dx)>Math.abs(dy)){mode='pan'; sx=t.clientX; startI0=i0; e.preventDefault();}
+      if(Math.abs(dx)>Math.abs(dy)){mode='pan'; e.preventDefault(); i0=clampI0(startI0-pxToBars(dx)*PAN_GAIN,span); schedule();}
       else mode='scroll';
     }
   },{passive:false});
   function touchEnd(e){
-    clearTimeout(timer);
+    clearTimeout(timer); lastTouch=Date.now();
     if(e.touches&&e.touches.length>0)return;      // 아직 손가락이 남아 있음
     pinch=null;
+    if(mode===null&&e.type==='touchend'&&Date.now()-tStart<300){   // 짧게 톡 → 두 번이면 기본값
+      var now=Date.now();
+      if(now-lastTap<350){resetView(); lastTap=0;} else lastTap=now;
+    }
     if(mode!=='cross')mode=null;                   // 십자선은 손을 떼도 남고, 다음 터치 때 사라짐
   }
   gd.addEventListener('touchend',touchEnd);
@@ -286,18 +302,20 @@ function installCrosshair(gd, initSpan, S, B){
   gd.addEventListener('contextmenu',function(e){e.preventDefault();});
 
   // ── PC: 마우스를 누른 채 끌면 이동, 그냥 움직이면 십자선, Ctrl+휠=확대/축소 ──
-  gd.addEventListener('mousedown',function(e){mdown=true; sx=e.clientX; startI0=i0; e.preventDefault();});
+  function emu(e){return (Date.now()-lastTouch<1000)||(e.sourceCapabilities&&e.sourceCapabilities.firesTouchEvents);}
+  gd.addEventListener('mousedown',function(e){if(emu(e))return; mdown=true; sx=e.clientX; startI0=i0; e.preventDefault();});
   window.addEventListener('mousemove',function(e){
     if(!mdown)return;
     i0=clampI0(startI0-pxToBars(e.clientX-sx),span); schedule();
   },true);
   window.addEventListener('mouseup',function(){mdown=false;},true);
-  gd.addEventListener('mousemove',function(e){move(e.clientX,e.clientY);});
-  gd.addEventListener('mouseleave',hide);
+  gd.addEventListener('mousemove',function(e){if(emu(e))return; move(e.clientX,e.clientY);});
+  gd.addEventListener('mouseleave',function(e){if(emu(e))return; hide();});
+  gd.addEventListener('dblclick',function(e){resetView();});
   gd.addEventListener('wheel',function(e){
     if(!e.ctrlKey)return; e.preventDefault();
     var f=fracOf(e.clientX), anchor=i0+f*span;
-    var ns=clampSpan(span*(e.deltaY>0?1.15:0.87));
+    var ns=clampSpan(span*(e.deltaY>0?1.23:0.81));
     if(ns===span)ns=clampSpan(span+(e.deltaY>0?1:-1));
     span=ns; i0=clampI0(anchor-f*ns,ns); schedule();
   },{passive:false});
@@ -363,7 +381,7 @@ with tab1:
     fig.add_trace(go.Bar(x=dates, y=cv, marker_color=direction_colors(curvev),
                          name="곡선추세 방향", showlegend=False), row=2, col=1)
     show(finish(fig, "곡선추세 방향"), "chart_trend", cv)
-    st.caption("조작: 좌우로 밀기=기간 이동 · 길게 누름(진동)=십자선 · 두 손가락 벌리기/모으기 또는 ＋/－=확대·축소. "
+    st.caption("조작: 좌우로 밀기=기간 이동 · 길게 누름(진동)=십자선 · 두 손가락 벌리기/모으기 또는 ＋/－=확대·축소 · 두 번 톡(더블클릭)=기본값. "
                "하단 봉: 곡선추세가 상승 중이면 빨강, 하락 중이면 파랑.")
 
 with tab2:
