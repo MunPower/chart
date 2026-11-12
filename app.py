@@ -18,7 +18,7 @@ with st.expander("⚙️ 설정", expanded=False):
     c1, c2, c3 = st.columns(3)
     code = c1.text_input("종목코드", "278530")
     disp = c2.number_input("보이는 기간(거래일, 60~120)", 60, 120, 120, 10,
-                           help="차트를 손가락으로 좌우로 밀면 기간이 이동하고, 1초쯤 길게 누르면 십자선이 나옵니다.")
+                           help="처음 열 때 보이는 기간입니다. 차트에서 두 손가락으로 벌리거나 ＋/－ 버튼으로 20~120일까지 조절할 수 있습니다.")
     calc = c3.number_input("계산 기간(거래일)", 120, 2000, 500, 50,
                            help="직선/곡선 계산에 쓰는 기간. 직선추세 기울기를 맞출 때 조절하세요.")
     c4, c5, c6 = st.columns(3)
@@ -145,14 +145,24 @@ def base_traces(fig):
 
 CROSSHAIR_JS = """
 function installCrosshair(gd, initSpan, S, B){
-  var LP_MS=1000;   // 길게 눌러 십자선이 나오기까지의 시간(ms)
+  var LP_MS=1500;   // 길게 눌러 진동과 함께 십자선이 나오기까지의 시간(ms)
+  // 브라우저(앱 브라우저)가 두 손가락으로 화면 전체를 확대하지 못하게 막기
+  try{
+    var pd=window.parent.document, mv=pd.querySelector('meta[name=viewport]');
+    if(mv)mv.setAttribute('content','width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
+    if(!pd.getElementById('nozoom_css')){
+      var st=pd.createElement('style'); st.id='nozoom_css';
+      st.textContent='iframe{touch-action:pan-y !important;}'; pd.head.appendChild(st);
+    }
+  }catch(err){}
   gd.style.position='relative'; gd.style.touchAction='pan-y';
   gd.style.userSelect='none'; gd.style.webkitUserSelect='none';
   gd.style.webkitTouchCallout='none'; gd.style.webkitTapHighlightColor='transparent';
-  var cats=gd.data[0].x, N=cats.length, MINS=Math.min(60,N), MAXS=Math.min(120,N);
-  var span=Math.max(MINS,Math.min(MAXS,initSpan)), i0=N-span;
-  var pending=false, mode=null, timer=null, sx=0, sy=0, startI0=0, lastT=null, mdown=false;
-  var vel=0, lastTs=0, cur=null, samples=[];
+  var cats=gd.data[0].x, N=cats.length, MINS=Math.min(20,N), MAXS=Math.min(Math.max(120,initSpan),N);
+  function clampSpan(v){return Math.round(Math.max(MINS,Math.min(MAXS,v)));}
+  function clampI0(v,sp){return Math.round(Math.max(0,Math.min(N-sp,v)));}
+  var span=clampSpan(initSpan), i0=N-span;
+  var pending=false, mode=null, timer=null, sx=0, sy=0, startI0=0, lastT=null, mdown=false, pinch=null, markersOn=null;
 
   function mk(css){var d=document.createElement('div');
     d.style.cssText='position:absolute;pointer-events:none;display:none;z-index:50;'+css;
@@ -165,42 +175,25 @@ function installCrosshair(gd, initSpan, S, B){
   function hide(){[vl,hl,dl,pr].forEach(function(e){e.style.display='none';});}
 
   function fmt(c){return c.slice(5).replace('-','.');}
-  function clampI0(v,sp){return Math.max(0,Math.min(N-sp,v));}
 
-  // 보이는 구간의 최고/최저에 맞춘 목표 가격 범위
-  function targetY(){
+  // 보이는 구간의 최고/최저에 맞춰 가격 범위를 즉시 변경
+  function render(){
+    pending=false;
     var a=Math.max(0,Math.floor(i0)), b=Math.min(N-1,Math.ceil(i0+span)-1), i, k, v;
     var lo=Infinity, hi=-Infinity, bl=0, bh=0;
     for(k=0;k<S.length;k++){for(i=a;i<=b;i++){v=S[k][i]; if(v<lo)lo=v; if(v>hi)hi=v;}}
     for(i=a;i<=b;i++){v=B[i]; if(v<bl)bl=v; if(v>bh)bh=v;}
     var pad=(hi-lo)*0.06||1;
-    return {lo:lo-pad,hi:hi+pad,bl:bl*1.1,bh:(bh*1.1)||1};
-  }
-  function render(snap){
-    var tg=targetY();
-    if(!cur||snap){cur={lo:tg.lo,hi:tg.hi,bl:tg.bl,bh:tg.bh};}
-    else{var k=0.3; cur.lo+=(tg.lo-cur.lo)*k; cur.hi+=(tg.hi-cur.hi)*k; cur.bl+=(tg.bl-cur.bl)*k; cur.bh+=(tg.bh-cur.bh)*k;}
-    var done=(Math.abs(tg.lo-cur.lo)+Math.abs(tg.hi-cur.hi))<(tg.hi-tg.lo)*0.002;
-    if(done){cur.lo=tg.lo;cur.hi=tg.hi;cur.bl=tg.bl;cur.bh=tg.bh;}
-    var a=Math.max(0,Math.floor(i0)), step=Math.max(8,Math.round(span/4)), tv=[], tt=[], idx;
+    var step=Math.max(3,Math.round(span/4)), tv=[], tt=[], idx;
     for(idx=N-1;idx>=a;idx-=step){tv.push(cats[idx]); tt.push(fmt(cats[idx]));}
     var xr=[i0-0.5,i0+span-0.5];
     Plotly.relayout(gd,{'xaxis.range':xr,'xaxis2.range':xr,
-      'yaxis.range':[cur.lo,cur.hi],'yaxis2.range':[cur.bl,cur.bh],
+      'yaxis.range':[lo-pad,hi+pad],'yaxis2.range':[bl*1.1,(bh*1.1)||1],
       'xaxis.tickvals':tv,'xaxis.ticktext':tt,'xaxis2.tickvals':tv,'xaxis2.ticktext':tt});
-    return done;
+    var mk2=span<=40;                        // 확대했을 때는 일별 점을 표시
+    if(mk2!==markersOn){markersOn=mk2; Plotly.restyle(gd,{mode:mk2?'lines+markers':'lines','marker.size':4},[0]);}
   }
-  function frame(ts){
-    pending=false;
-    var dt=Math.min(40,(ts-lastTs)||16); lastTs=ts;
-    if(Math.abs(vel)>0.0004 && mode!=='pan' && !mdown){        // 관성 이동
-      var before=i0; i0=clampI0(i0+vel*dt,span);
-      if(i0===before)vel=0; else vel*=Math.pow(0.996,dt);
-    } else if(mode!=='pan' && !mdown){vel=0;}
-    var done=render(false);
-    if(!done||Math.abs(vel)>0.0004)schedule();
-  }
-  function schedule(){if(!pending){pending=true;requestAnimationFrame(frame);}}
+  function schedule(){if(!pending){pending=true;requestAnimationFrame(render);}}
 
   function move(cx,cy){
     var r=gd.getBoundingClientRect(), x=cx-r.left, y=cy-r.top;
@@ -220,71 +213,95 @@ function installCrosshair(gd, initSpan, S, B){
     pr.style.display='block'; pr.style.left=(s.l+s.w+2)+'px'; pr.style.top=y+'px'; pr.textContent=txt;
   }
   function pxToBars(dx){return dx/gd._fullLayout._size.w*span;}
-  function sample(){var now=performance.now(); samples.push([now,i0]); while(samples.length&&now-samples[0][0]>120)samples.shift();}
-  function release(){   // 손가락/마우스를 뗄 때 속도를 계산해 관성 이동
-    var now=performance.now();
-    if(samples.length>=2 && now-samples[samples.length-1][0]<80){
-      var a=samples[0], b=samples[samples.length-1];
-      vel=(b[0]-a[0]>8)?(b[1]-a[1])/(b[0]-a[0]):0;
-      vel=Math.max(-0.3,Math.min(0.3,vel));
-    } else vel=0;
-    samples=[]; schedule();
+  function fracOf(clientX){
+    var r=gd.getBoundingClientRect(), s=gd._fullLayout._size;
+    return Math.max(0,Math.min(1,(clientX-r.left-s.l)/s.w));
+  }
+  function dist(t){var dx=t[0].clientX-t[1].clientX, dy=t[0].clientY-t[1].clientY; return Math.sqrt(dx*dx+dy*dy);}
+  function zoomBy(factor){                    // 화면 가운데 기준 확대/축소
+    var c=i0+span/2, ns=clampSpan(span*factor);
+    if(ns===span)ns=clampSpan(span+(factor<1?-1:1));
+    span=ns; i0=clampI0(c-ns/2,ns); hide(); schedule();
   }
 
-  // ── 손가락: 바로 좌우로 밀면 기간 이동 / 1초 길게 누르면 십자선 ──
+  // ── 확대/축소 버튼 (두 손가락 확대가 막히는 폰용) ──
+  function btn(txt,right,fn){
+    var b=document.createElement('div'); b.textContent=txt;
+    b.style.cssText='position:absolute;top:2px;right:'+right+'px;width:28px;height:22px;line-height:22px;text-align:center;'
+      +'font:600 15px sans-serif;background:#f3f3f3;border:1px solid #ccc;border-radius:4px;z-index:60;cursor:pointer;'
+      +'touch-action:manipulation;user-select:none;-webkit-user-select:none;';
+    ['touchstart','touchmove','touchend','mousedown','mousemove'].forEach(function(n){
+      b.addEventListener(n,function(e){e.stopPropagation();},{passive:true});});
+    b.addEventListener('click',function(e){e.stopPropagation();fn();});
+    gd.appendChild(b);
+  }
+  btn('＋',92,function(){zoomBy(0.7);});
+  btn('－',62,function(){zoomBy(1/0.7);});
+
+  // ── 손가락 ──
+  // 바로 좌우로 밀기=기간 이동(한 칸씩 딱딱하게) / 길게 눌러 진동=십자선 / 두 손가락=확대·축소
   gd.addEventListener('touchstart',function(e){
-    if(e.touches.length!==1){clearTimeout(timer);mode='scroll';return;}
-    vel=0; hide();
-    var t=e.touches[0]; lastT=t; sx=t.clientX; sy=t.clientY; startI0=i0; mode=null; samples=[];
     clearTimeout(timer);
+    if(e.touches.length>=2){
+      hide(); mode='pinch';
+      pinch={d:dist(e.touches),span:span,anchor:i0+fracOf((e.touches[0].clientX+e.touches[1].clientX)/2)*span};
+      return;
+    }
+    hide();
+    var t=e.touches[0]; lastT=t; sx=t.clientX; sy=t.clientY; startI0=i0; mode=null;
     timer=setTimeout(function(){
-      if(mode===null){mode='cross'; if(navigator.vibrate)navigator.vibrate(15); move(lastT.clientX,lastT.clientY);}
+      if(mode===null){mode='cross'; if(navigator.vibrate)navigator.vibrate(30); move(lastT.clientX,lastT.clientY);}
     },LP_MS);
   },{passive:true});
   gd.addEventListener('touchmove',function(e){
+    if(mode==='pinch'){
+      if(e.touches.length===2&&pinch){
+        e.preventDefault();
+        var f=fracOf((e.touches[0].clientX+e.touches[1].clientX)/2);
+        var ns=clampSpan(pinch.span*pinch.d/dist(e.touches));
+        span=ns; i0=clampI0(pinch.anchor-f*ns,ns); schedule();
+      }
+      return;
+    }
     if(e.touches.length!==1)return;
     var t=e.touches[0]; lastT=t;
     if(mode==='cross'){e.preventDefault(); move(t.clientX,t.clientY); return;}
-    if(mode==='pan'){
-      e.preventDefault();
-      i0=clampI0(startI0-pxToBars(t.clientX-sx),span); sample(); schedule(); return;
-    }
+    if(mode==='pan'){e.preventDefault(); i0=clampI0(startI0-pxToBars(t.clientX-sx),span); schedule(); return;}
     if(mode==='scroll')return;
     var dx=t.clientX-sx, dy=t.clientY-sy;
     if(Math.abs(dx)>6||Math.abs(dy)>6){
       clearTimeout(timer);
-      if(Math.abs(dx)>Math.abs(dy)){mode='pan'; sx=t.clientX; startI0=i0; samples=[]; e.preventDefault();}
+      if(Math.abs(dx)>Math.abs(dy)){mode='pan'; sx=t.clientX; startI0=i0; e.preventDefault();}
       else mode='scroll';
     }
   },{passive:false});
-  function touchEnd(){
+  function touchEnd(e){
     clearTimeout(timer);
-    if(mode==='pan')release();
-    if(mode!=='cross')mode=null;       // 십자선은 손을 떼도 남아 있고, 다음 터치 때 사라짐
+    if(e.touches&&e.touches.length>0)return;      // 아직 손가락이 남아 있음
+    pinch=null;
+    if(mode!=='cross')mode=null;                   // 십자선은 손을 떼도 남고, 다음 터치 때 사라짐
   }
   gd.addEventListener('touchend',touchEnd);
   gd.addEventListener('touchcancel',touchEnd);
   gd.addEventListener('contextmenu',function(e){e.preventDefault();});
 
-  // ── PC: 마우스를 누른 채 끌면 이동, 그냥 움직이면 십자선 ──
-  gd.addEventListener('mousedown',function(e){
-    vel=0; mdown=true; sx=e.clientX; startI0=i0; samples=[]; e.preventDefault();
-  });
+  // ── PC: 마우스를 누른 채 끌면 이동, 그냥 움직이면 십자선, Ctrl+휠=확대/축소 ──
+  gd.addEventListener('mousedown',function(e){mdown=true; sx=e.clientX; startI0=i0; e.preventDefault();});
   window.addEventListener('mousemove',function(e){
     if(!mdown)return;
-    i0=clampI0(startI0-pxToBars(e.clientX-sx),span); sample(); schedule();
+    i0=clampI0(startI0-pxToBars(e.clientX-sx),span); schedule();
   },true);
-  window.addEventListener('mouseup',function(){if(mdown){mdown=false;release();}},true);
+  window.addEventListener('mouseup',function(){mdown=false;},true);
   gd.addEventListener('mousemove',function(e){move(e.clientX,e.clientY);});
   gd.addEventListener('mouseleave',hide);
-  gd.addEventListener('wheel',function(e){   // PC: Ctrl + 휠로 기간 조절(60~120일)
+  gd.addEventListener('wheel',function(e){
     if(!e.ctrlKey)return; e.preventDefault();
-    var r=gd.getBoundingClientRect(), s=gd._fullLayout._size;
-    var f=Math.max(0,Math.min(1,(e.clientX-r.left-s.l)/s.w)), anchor=i0+f*span;
-    var ns=Math.max(MINS,Math.min(MAXS,span*(e.deltaY>0?1.1:0.9)));
+    var f=fracOf(e.clientX), anchor=i0+f*span;
+    var ns=clampSpan(span*(e.deltaY>0?1.15:0.87));
+    if(ns===span)ns=clampSpan(span+(e.deltaY>0?1:-1));
     span=ns; i0=clampI0(anchor-f*ns,ns); schedule();
   },{passive:false});
-  render(true);
+  render();
 }
 """
 
@@ -346,7 +363,8 @@ with tab1:
     fig.add_trace(go.Bar(x=dates, y=cv, marker_color=direction_colors(curvev),
                          name="곡선추세 방향", showlegend=False), row=2, col=1)
     show(finish(fig, "곡선추세 방향"), "chart_trend", cv)
-    st.caption("하단 봉: 곡선추세가 상승 중이면 빨강, 하락 중이면 파랑 (추세 전환 시점 확인용)")
+    st.caption("조작: 좌우로 밀기=기간 이동 · 길게 누름(진동)=십자선 · 두 손가락 벌리기/모으기 또는 ＋/－=확대·축소. "
+               "하단 봉: 곡선추세가 상승 중이면 빨강, 하락 중이면 파랑.")
 
 with tab2:
     P, r2, cyc = fit_cycle(resid)
