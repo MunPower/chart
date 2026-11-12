@@ -6,6 +6,7 @@ from plotly.subplots import make_subplots
 import FinanceDataReader as fdr
 import json
 import html
+import re
 import streamlit.components.v1 as components
 
 st.set_page_config(page_title="추세전환/사이클 차트", layout="wide", initial_sidebar_state="collapsed")
@@ -16,6 +17,45 @@ header,[data-testid="stHeader"],[data-testid="stToolbar"],[data-testid="stDecora
 
 # ───────────── 차트 계산 설정(고정값) ─────────────
 disp, calc, lam, kmul, band_pct = 120, 500, 1e4, 1.4, 0.0
+
+
+# ───────────── 종목 검색 (한글·영문 혼용) ─────────────
+LETTERS = {"A": "에이", "B": "비", "C": "씨", "D": "디", "E": "이", "F": "에프", "G": "지", "H": "에이치",
+           "I": "아이", "J": "제이", "K": "케이", "L": "엘", "M": "엠", "N": "엔", "O": "오", "P": "피",
+           "Q": "큐", "R": "알", "S": "에스", "T": "티", "U": "유", "V": "브이", "W": "더블유",
+           "X": "엑스", "Y": "와이", "Z": "제트"}
+# 영문 단어 → 한글 발음 (자주 쓰는 영문 사명·ETF 브랜드)
+WORDS = {
+    "naver": "네이버", "posco": "포스코", "kakao": "카카오", "kakaobank": "카카오뱅크", "kakaopay": "카카오페이",
+    "kodex": "코덱스", "tiger": "타이거", "ace": "에이스", "sol": "쏠", "kbstar": "케이비스타",
+    "hanaro": "하나로", "rise": "라이즈", "plus": "플러스", "arirang": "아리랑", "kosef": "코세프",
+    "kindex": "킨덱스", "timefolio": "타임폴리오", "woori": "우리", "hana": "하나", "shinhan": "신한",
+    "samsung": "삼성", "hyundai": "현대", "lotte": "롯데", "hanwha": "한화", "doosan": "두산",
+    "celltrion": "셀트리온", "kia": "기아", "amorepacific": "아모레퍼시픽", "krafton": "크래프톤",
+    "netmarble": "넷마블", "ncsoft": "엔씨소프트", "oil": "오일", "lg": "엘지", "sk": "에스케이",
+    "kt": "케이티", "cj": "씨제이", "gs": "지에스", "kb": "케이비", "db": "디비", "ls": "엘에스",
+}
+PHRASES = {r"s-oil": "에쓰오일"}
+
+
+def norm(t) -> str:
+    return re.sub(r"[\s\-_.·&/()]", "", str(t)).lower()
+
+
+def to_ko(name: str) -> str:
+    """영문이 섞인 이름을 한글 발음으로 변환 (NAVER→네이버, LG전자→엘지전자, SK하이닉스→에스케이하이닉스)"""
+    t = str(name)
+    for k, v in PHRASES.items():
+        t = re.sub(k, v, t, flags=re.I)
+
+    def rep(m):
+        w = m.group(0)
+        if w.lower() in WORDS:
+            return WORDS[w.lower()]
+        if len(w) <= 6 and (w.isupper() or len(w) <= 3):      # 약어는 알파벳 읽는 소리로 (예: GS→지에스)
+            return "".join(LETTERS.get(c.upper(), c) for c in w)
+        return w
+    return re.sub(r"[A-Za-z]+", rep, t)
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
@@ -30,10 +70,33 @@ def listing() -> pd.DataFrame:
         except Exception:
             pass
     if not frames:
-        return pd.DataFrame(columns=["Code", "Name"])
-    out = pd.concat(frames).dropna().drop_duplicates("Code")
+        return pd.DataFrame(columns=["Code", "Name", "nn", "nk"])
+    out = pd.concat(frames).dropna().drop_duplicates("Code").reset_index(drop=True)
     out["Code"] = out["Code"].astype(str)
-    return out.reset_index(drop=True)
+    out["nn"] = out["Name"].map(norm)                       # 원래 이름(정규화)
+    out["nk"] = out["Name"].map(lambda x: norm(to_ko(x)))   # 한글 발음 이름(정규화)
+    return out
+
+
+def search(lst: pd.DataFrame, q: str):
+    """('exact', 1행) 바로 표시 / ('list', 여러행) 연관 종목 선택 / ('none', 빈표)"""
+    nq, nqk = norm(q), norm(to_ko(q))
+    if not nq or lst.empty:
+        return "none", lst.iloc[0:0]
+    exact = lst[(lst["nn"] == nq) | (lst["nk"] == nq) | (lst["nk"] == nqk)]
+    if len(exact) == 1:
+        return "exact", exact
+    m = exact
+    if m.empty:
+        m = lst[lst["nn"].str.contains(nq, regex=False) | lst["nk"].str.contains(nq, regex=False)
+                | lst["nk"].str.contains(nqk, regex=False) | lst["Code"].str.startswith(q.upper())]
+    if m.empty:
+        return "none", m
+    if len(m) == 1:
+        return "exact", m
+    starts = m["nn"].str.startswith(nq) | m["nk"].str.startswith(nq) | m["nk"].str.startswith(nqk)
+    m = m.assign(_s=(~starts).astype(int), _l=m["Name"].str.len()).sort_values(["_s", "_l"])
+    return "list", m
 
 
 # ───────────── 종목 이름 + 검색 ─────────────
@@ -43,25 +106,26 @@ if "code" not in st.session_state:
     st.session_state.code = "278530"
 
 name_ph = st.empty()
-q = st.text_input("종목 검색", placeholder="🔍 종목코드 또는 종목명 (예: 278530, 삼성전자)",
+q = st.text_input("종목 검색", placeholder="🔍 종목코드 또는 종목명 (예: 278530, 삼성전자, 네이버)",
                   label_visibility="collapsed").strip()
 if q:
     qu = q.upper()
     if qu in names or (len(q) == 6 and q.isdigit()):
-        st.session_state.code = qu
+        st.session_state.code = qu                                  # 종목코드 → 바로 표시
     elif lst.empty:
         st.caption("종목 목록을 불러오지 못했습니다. 6자리 종목코드로 검색해 주세요.")
     else:
-        m = lst[lst["Name"].str.contains(q, case=False, regex=False) | lst["Code"].str.startswith(qu)]
-        if m.empty:
-            st.caption("검색 결과가 없습니다.")
-        else:
-            m = m.assign(_l=m["Name"].str.len()).sort_values("_l").head(20)
-            opts = [f"{r.Name} ({r.Code})" for r in m.itertuples()]
-            sel = st.selectbox("검색 결과", opts, index=None, placeholder="검색 결과에서 선택",
-                               label_visibility="collapsed")
+        kind, m = search(lst, q)
+        if kind == "exact":                                         # 이름이 정확히 맞으면 바로 표시
+            st.session_state.code = m.iloc[0]["Code"]
+        elif kind == "list":                                        # 일부만 입력 → 연관 종목에서 선택
+            opts = [f"{r.Name} ({r.Code})" for r in m.head(30).itertuples()]
+            sel = st.selectbox("연관 종목", opts, index=None, key=f"sel_{norm(q)}",
+                               placeholder=f"연관 종목 {len(m)}개 — 여기서 선택", label_visibility="collapsed")
             if sel:
                 st.session_state.code = sel.rsplit("(", 1)[1].rstrip(")")
+        else:
+            st.caption("검색 결과가 없습니다.")
 code = st.session_state.code
 name = names.get(code, code)
 name_ph.markdown(
