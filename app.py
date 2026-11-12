@@ -16,7 +16,8 @@ header,[data-testid="stHeader"],[data-testid="stToolbar"],[data-testid="stDecora
 </style>""", unsafe_allow_html=True)
 
 # ───────────── 차트 계산 설정(고정값) ─────────────
-disp, calc, lam, kmul, band_pct = 120, 500, 1e4, 1.4, 0.0
+disp, calc, lam, kmul, band_pct = 120, 720, 8e3, 1.6, 0.0
+DEFAULT_CODE = "278530"   # 처음 열 때 보여줄 종목: KODEX 200TR
 
 
 # ───────────── 종목 검색 (한글·영문 혼용) ─────────────
@@ -102,8 +103,9 @@ def search(lst: pd.DataFrame, q: str):
 # ───────────── 종목 이름 + 검색 ─────────────
 lst = listing()
 names = dict(zip(lst["Code"], lst["Name"]))
+names.setdefault(DEFAULT_CODE, "KODEX 200TR")   # 종목 목록을 못 불러와도 이름 표시
 if "code" not in st.session_state:
-    st.session_state.code = "278530"
+    st.session_state.code = DEFAULT_CODE
 
 name_ph = st.empty()
 q = st.text_input("종목 검색", placeholder="🔍 종목코드 또는 종목명 (예: 278530, 삼성전자, 네이버)",
