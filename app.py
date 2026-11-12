@@ -23,7 +23,7 @@ with st.expander("⚙️ 설정", expanded=False):
                            help="직선/곡선 계산에 쓰는 기간. 직선추세 기울기를 맞출 때 조절하세요.")
     c4, c5, c6 = st.columns(3)
     lam = c4.select_slider("HP필터 λ (클수록 곡선이 완만)",
-                           options=[1e3, 3e3, 1e4, 2e4, 5e4, 1e5, 3e5, 1e6], value=1e4,
+                           options=[5e3, 6e3, 7e3, 8e3, 9e3, 1e4, 2e4, 5e4, 1e5, 3e5, 1e6], value=8e3,
                            format_func=lambda v: f"{v:,.0f}")
     kmul = c5.slider("상·하한 폭 (σ 배수, 90%=1.645)", 0.5, 3.0, 1.4, 0.005)
     band_pct = c6.number_input("상·하한 폭 직접 지정(%) · 0이면 σ방식", 0.0, 30.0, 0.0, 0.1)
