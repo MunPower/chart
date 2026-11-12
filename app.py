@@ -145,7 +145,7 @@ def base_traces(fig):
 
 CROSSHAIR_JS = """
 function installCrosshair(gd, initSpan, S, B){
-  var LP_MS=1500;          // 길게 눌러 진동이 오기까지의 시간(ms)
+  var LP_MS=500;          // 길게 눌러 진동이 오기까지의 시간(ms)
   var CROSS_DELAY_MS=150;  // 진동 후 십자선이 나타나기까지의 시간(ms) (진동 → 십자선 순서 맞춤)
   var PAN_GAIN=1.5;        // 손가락 이동 속도 배율
   var ZOOM_GAIN=1.5;       // 확대/축소 속도 배율
