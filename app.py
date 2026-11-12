@@ -14,7 +14,7 @@ st.markdown("""<style>
 </style>""", unsafe_allow_html=True)
 
 # ───────────── 설정 (평소에는 접어 둠) ─────────────
-with st.expander("⚙️ 설정", expanded=False):
+with st.expander("⚙️ 설정", expanded=True):
     c1, c2, c3 = st.columns(3)
     code = c1.text_input("종목코드", "278530")
     disp = c2.number_input("보이는 기간(거래일, 60~120)", 60, 120, 120, 10,
