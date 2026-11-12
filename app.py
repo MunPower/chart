@@ -16,7 +16,7 @@ st.markdown("""<style>
 with st.expander("⚙️ 설정", expanded=False):
     c1, c2, c3 = st.columns(3)
     code = c1.text_input("종목코드", "278530")
-    disp = c2.number_input("화면 표시 기간(거래일)", 60, 600, 120, 10)
+    disp = c2.number_input("화면 표시 기간(거래일)", 60, 600, 60, 10)
     calc = c3.number_input("계산 기간(거래일)", 120, 2000, 720, 50,
                            help="직선/곡선 계산에 쓰는 기간. 직선추세 기울기를 맞출 때 조절하세요.")
     c4, c5, c6 = st.columns(3)
