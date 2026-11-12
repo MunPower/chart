@@ -6,22 +6,25 @@ from plotly.subplots import make_subplots
 import FinanceDataReader as fdr
 import streamlit.components.v1 as components
 
-st.set_page_config(page_title="추세전환/사이클 차트", layout="wide")
-st.title("추세전환 / 추세사이클 차트")
+st.set_page_config(page_title="추세전환/사이클 차트", layout="wide", initial_sidebar_state="collapsed")
+st.markdown("""<style>
+.block-container{padding:0.6rem 0.4rem 1rem 0.4rem;max-width:100%;}
+[data-testid="stToolbar"],footer{display:none !important;}
+</style>""", unsafe_allow_html=True)
 
-c1, c2, c3 = st.columns(3)
-code = c1.text_input("종목코드", "278530")
-disp = c2.number_input("화면 표시 기간(거래일)", 60, 600, 120, 10)
-calc = c3.number_input("계산 기간(거래일) - 직선/곡선 계산에 사용", 120, 2000, 720, 50,
-                       help="클수록 긴 과거로 추세를 계산합니다. 직선추세 기울기를 맞출 때 조절하세요.")
-
-c4, c5, c6 = st.columns(3)
-lam = c4.select_slider("HP필터 λ (클수록 곡선이 완만)",
-                       options=[5e3, 6e3, 7e3, 8e3, 9e3, 1e4, 2e4, 5e4, 1e5, 3e5, 1e6], value=8e3,
-                       format_func=lambda v: f"{v:,.0f}")
-kmul = c5.slider("상·하한 폭 (σ 배수, 90% 신뢰구간 = 1.645)", 0.5, 3.0, 1.645, 0.005)
-band_pct = c6.number_input("상·하한 폭 직접 지정(%) · 0이면 σ방식", 0.0, 30.0, 0.0, 0.1,
-                           help="증권사 차트는 곡선의 약 ±5.4%로 보입니다. 5.4를 입력해 보세요.")
+# ───────────── 설정 (평소에는 접어 둠) ─────────────
+with st.expander("⚙️ 설정", expanded=False):
+    c1, c2, c3 = st.columns(3)
+    code = c1.text_input("종목코드", "278530")
+    disp = c2.number_input("화면 표시 기간(거래일)", 60, 600, 120, 10)
+    calc = c3.number_input("계산 기간(거래일)", 120, 2000, 720, 50,
+                           help="직선/곡선 계산에 쓰는 기간. 직선추세 기울기를 맞출 때 조절하세요.")
+    c4, c5, c6 = st.columns(3)
+    lam = c4.select_slider("HP필터 λ (클수록 곡선이 완만)",
+                           options=[5e3, 6e3, 7e3, 8e3, 9e3, 1e4, 2e4, 5e4, 1e5, 3e5, 1e6], value=8e3,
+                           format_func=lambda v: f"{v:,.0f}")
+    kmul = c5.slider("상·하한 폭 (σ 배수, 90%=1.645)", 0.5, 3.0, 1.4, 0.005)
+    band_pct = c6.number_input("상·하한 폭 직접 지정(%) · 0이면 σ방식", 0.0, 30.0, 0.0, 0.1)
 
 
 @st.cache_data(ttl=600)
@@ -87,16 +90,22 @@ sl = slice(n - D, n)
 dates = df.index.strftime("%Y-%m-%d")[sl]
 yv, linev, curvev, upv, lov = y[sl], line[sl], curve[sl], upper[sl], lower[sl]
 
+# ───────────── 상단 시세 헤더 ─────────────
 last, prev = y[-1], y[-2]
-m = st.columns(5)
-m[0].metric("현재가", f"{last:,.0f}", f"{last - prev:+,.0f}", delta_color="inverse")
-m[1].metric("전일대비", f"{(last / prev - 1) * 100:+.2f}%")
-m[2].metric("거래량", f"{df['Volume'].iloc[-1]:,.0f}")
-m[3].metric("상한 대비율", f"{last / upper[-1] * 100:.1f}%", help="100% 초과 시 90% 범위 위로 이탈")
-m[4].metric("하한 대비율", f"{last / lower[-1] * 100:.1f}%", help="100% 미만 시 90% 범위 아래로 이탈")
-st.caption(f"직선추세: 화면 시작 {linev[0]:,.0f} → 끝 {linev[-1]:,.0f} · "
-           f"상·하한 폭: 곡선의 ±{width * 100:.1f}%")
-
+chg = last - prev
+pct = chg / prev * 100
+col = "#e5484d" if chg > 0 else ("#3b6fd4" if chg < 0 else "#333333")
+arrow = "▲" if chg > 0 else ("▼" if chg < 0 else "-")
+vol = df["Volume"].iloc[-1]
+st.markdown(
+    '<div style="display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap">'
+    f'<span style="font-size:42px;font-weight:700;color:{col};line-height:1">{last:,.0f}</span>'
+    f'<span style="font-size:17px;color:{col};padding-bottom:4px">{arrow} {abs(chg):,.0f} &nbsp; {pct:+.2f}%</span>'
+    '</div>'
+    f'<div style="font-size:13px;color:#888;margin-top:4px">{code.strip()} · 거래량 {vol:,.0f}</div>'
+    f'<div style="font-size:12px;color:#888;margin-top:2px">직선추세 {linev[0]:,.0f}→{linev[-1]:,.0f} · '
+    f'상한대비 {last / upper[-1] * 100:.1f}% · 하한대비 {last / lower[-1] * 100:.1f}% · 상·하한폭 ±{width * 100:.1f}%</div>',
+    unsafe_allow_html=True)
 
 with st.expander("🔧 계산 기간 찾기 (증권사 직선추세 값에 맞추기)"):
     t1, t2 = st.columns(2)
@@ -113,17 +122,18 @@ with st.expander("🔧 계산 기간 찾기 (증권사 직선추세 값에 맞�
             rows.append((L, a, b, abs(a - tgt0) + abs(b - tgt1)))
         res = pd.DataFrame(rows, columns=["계산기간", "직선 시작값", "직선 끝값", "오차"]).sort_values("오차").head(5)
         st.dataframe(res.round(0).astype(int), hide_index=True)
-        st.caption("오차가 가장 작은 '계산기간'을 위의 계산 기간 칸에 넣어 보세요.")
+        st.caption("오차가 가장 작은 '계산기간'을 설정의 계산 기간에 넣어 보세요.")
 
 
+# ───────────── 차트 ─────────────
 def direction_colors(v):
     d = np.diff(v, prepend=v[1])
     d[0] = d[1]
-    return np.where(d >= 0, "red", "blue")  # 상승=빨강, 하락=파랑
+    return np.where(d >= 0, "#e5484d", "#3b6fd4")  # 상승=빨강, 하락=파랑
 
 
 def base_traces(fig):
-    fig.add_trace(go.Scatter(x=dates, y=yv, name="수정종가", line=dict(color="red", width=2)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=dates, y=yv, name="수정종가", line=dict(color="#e5484d", width=1.8)), row=1, col=1)
     fig.add_trace(go.Scatter(x=dates, y=linev, name="직선추세", line=dict(color="magenta", width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=dates, y=curvev, name="곡선추세", line=dict(color="royalblue", width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=dates, y=upv, name="곡선추세상한", line=dict(color="navy", width=1)), row=1, col=1)
@@ -136,13 +146,12 @@ function installCrosshair(gd){
   function mk(css){var d=document.createElement('div');
     d.style.cssText='position:absolute;pointer-events:none;display:none;z-index:50;'+css;
     gd.appendChild(d);return d;}
-  var lab='background:#222;color:#fff;font:11px sans-serif;padding:2px 3px;white-space:nowrap;';
+  var lab='background:#222;color:#fff;font:11px sans-serif;padding:2px 4px;white-space:nowrap;';
   var vl=mk('width:0;border-left:1px solid #333;');
   var hl=mk('height:0;border-top:1px solid #333;');
   var dl=mk(lab+'transform:translateX(-50%);');
-  var pl=mk(lab+'width:44px;text-align:right;transform:translateY(-50%);');
-  var pr=mk(lab+'width:44px;transform:translateY(-50%);');
-  function hide(){[vl,hl,dl,pl,pr].forEach(function(e){e.style.display='none';});}
+  var pr=mk(lab+'width:50px;transform:translateY(-50%);');
+  function hide(){[vl,hl,dl,pr].forEach(function(e){e.style.display='none';});}
   function move(cx,cy){
     var r=gd.getBoundingClientRect(), x=cx-r.left, y=cy-r.top;
     var fl=gd._fullLayout, s=fl._size, xa=fl.xaxis, ya=fl.yaxis, yb=fl.yaxis2;
@@ -156,8 +165,8 @@ function installCrosshair(gd){
     var txt=Math.round(v).toLocaleString('en-US');
     vl.style.cssText+=';display:block;left:'+xs+'px;top:'+s.t+'px;height:'+s.h+'px;';
     hl.style.cssText+=';display:block;left:'+s.l+'px;top:'+y+'px;width:'+s.w+'px;';
-    dl.style.display='block'; dl.style.left=xs+'px'; dl.style.top=(s.t+s.h+2)+'px'; dl.textContent=cats[idx];
-    pl.style.display='block'; pl.style.left=(s.l-46)+'px'; pl.style.top=y+'px'; pl.textContent=txt;
+    dl.style.display='block'; dl.style.left=xs+'px';
+    dl.style.top=(ya._offset+ya._length+2)+'px'; dl.textContent=cats[idx];
     pr.style.display='block'; pr.style.left=(s.l+s.w+2)+'px'; pr.style.top=y+'px'; pr.textContent=txt;
   }
   gd.addEventListener('mousemove',function(e){move(e.clientX,e.clientY);});
@@ -168,22 +177,39 @@ function installCrosshair(gd){
 """
 
 
-def finish(fig):
-    pos = np.linspace(0, len(dates) - 1, 5).round().astype(int)
+def finish(fig, low_label):
+    m = len(dates)
+    pos = sorted({m - 1 - int(round(i * (m - 1) / 3.6)) for i in range(4)})
     fig.update_xaxes(type="category", tickmode="array",
                      tickvals=[dates[i] for i in pos],
-                     ticktext=[pd.to_datetime(dates[i]).strftime("%y-%m-%d") for i in pos],
-                     tickangle=0, tickfont=dict(size=10))
-    fig.update_yaxes(tickformat=",.0f", tickfont=dict(size=10))
-    # 오른쪽에도 가격 눈금 표시용(보이지 않는 점 하나)
-    fig.add_trace(go.Scatter(x=[dates[0]], y=[yv[0]], xaxis="x", yaxis="y3",
-                             mode="markers", marker=dict(opacity=0), showlegend=False,
-                             hoverinfo="skip"))
-    fig.update_layout(
-        yaxis3=dict(overlaying="y", side="right", matches="y", showgrid=False, tickformat=",.0f"),
-        height=640, margin=dict(l=50, r=50, t=16, b=40),
-        showlegend=False, bargap=0.05,
-        hovermode=False, dragmode=False)
+                     ticktext=[pd.to_datetime(dates[i]).strftime("%m.%d") for i in pos],
+                     tickangle=0, tickfont=dict(size=11, color="#555"),
+                     showgrid=True, gridcolor="#f0b8b8", gridwidth=1,
+                     showline=False, zeroline=False)
+    fig.update_xaxes(showticklabels=True, row=1, col=1)    # 날짜는 위 차트 아래(두 차트 사이)에 표시
+    fig.update_xaxes(showticklabels=False, row=2, col=1)
+    fig.update_yaxes(side="right", tickformat=",.0f", tickfont=dict(size=11, color="#555"),
+                     showgrid=True, gridcolor="#eeeeee", zeroline=False, showline=False, ticks="")
+    fig.update_yaxes(nticks=4, row=2, col=1)
+    tagc = "#e5484d" if chg > 0 else "#3b6fd4"
+    # 현재가 태그(오른쪽 축)
+    fig.add_annotation(xref="paper", x=1.0, xanchor="left", yref="y", y=yv[-1], showarrow=False,
+                       text=f"{last:,.0f}<br>{pct:+.2f}%", align="left", borderpad=2,
+                       font=dict(color="white", size=11), bgcolor=tagc)
+    # 범례(차트 위 한 줄)
+    fig.add_annotation(xref="paper", yref="paper", x=0.0, y=1.0, xanchor="left", yanchor="bottom",
+                       showarrow=False, font=dict(size=11),
+                       text=('<span style="color:#e5484d">━ 수정종가</span>  '
+                             '<span style="color:#e020e0">━ 직선</span>  '
+                             '<span style="color:#4169e1">━ 곡선</span>  '
+                             '<span style="color:#000080">━ 상·하한</span>'))
+    # 아래 차트 이름
+    fig.add_annotation(xref="paper", yref="paper", x=0.01, y=fig.layout.yaxis2.domain[1],
+                       xanchor="left", yanchor="top", showarrow=False,
+                       text=low_label, font=dict(size=11, color="#555"))
+    fig.update_layout(height=620, margin=dict(l=4, r=58, t=26, b=22),
+                      showlegend=False, bargap=0.05, hovermode=False, dragmode=False,
+                      plot_bgcolor="white", paper_bgcolor="white")
     return fig
 
 
@@ -193,38 +219,30 @@ def show(fig, div_id):
         full_html=False, include_plotlyjs="cdn", div_id=div_id,
         config={"displayModeBar": False, "responsive": True, "scrollZoom": False},
         post_script="installCrosshair(document.getElementById('{plot_id}'));")
-    components.html(html, height=660)
+    components.html(html, height=640)
 
-
-st.markdown(
-    '<div style="font-size:13px;line-height:1.8">'
-    '<span style="color:red">━ 수정종가</span> &nbsp; '
-    '<span style="color:magenta">━ 직선추세</span> &nbsp; '
-    '<span style="color:royalblue">━ 곡선추세</span> &nbsp; '
-    '<span style="color:navy">━ 상한·하한</span></div>',
-    unsafe_allow_html=True)
 
 tab1, tab2 = st.tabs(["추세전환차트", "추세사이클차트"])
 
 with tab1:
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.72, 0.28], vertical_spacing=0.03)
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.72, 0.28], vertical_spacing=0.06)
     base_traces(fig)
     cv = curvev - curvev.min()
     fig.add_trace(go.Bar(x=dates, y=cv, marker_color=direction_colors(curvev),
                          name="곡선추세 방향", showlegend=False), row=2, col=1)
-    show(finish(fig), "chart_trend")
+    show(finish(fig, "곡선추세 방향"), "chart_trend")
     st.caption("하단 봉: 곡선추세가 상승 중이면 빨강, 하락 중이면 파랑 (추세 전환 시점 확인용)")
 
 with tab2:
     P, r2, cyc = fit_cycle(resid)
     cyc = (cyc - cyc.mean())[sl]
-    fig2 = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.72, 0.28], vertical_spacing=0.03)
+    fig2 = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.72, 0.28], vertical_spacing=0.06)
     base_traces(fig2)
     fig2.add_trace(go.Bar(x=dates, y=cyc, marker_color=direction_colors(cyc),
                           name="싸이클", showlegend=False), row=2, col=1)
-    show(finish(fig2), "chart_cycle")
+    show(finish(fig2, "싸이클"), "chart_cycle")
     st.caption(f"추정 최적 주기 약 {P:.1f}거래일 · 잔차 설명력(R²) {r2 * 100:.0f}%. "
                "싸이클의 상승/하락은 추세의 상승/하락과 무관하며, 추세선보다 설명력이 낮은 보조 지표입니다.")
 
-st.info("HP필터 특성상 새 데이터가 추가되면 과거 곡선도 다시 계산되어 모양이 바뀝니다(끝점 효과). "
-        "미래에셋 차트는 스펙트럴 분석 등 비공개 방식을 쓰므로 이 앱은 근사 재현입니다. 투자 판단은 본인 책임입니다.")
+st.caption("HP필터 특성상 새 데이터가 추가되면 과거 곡선도 다시 계산되어 모양이 바뀝니다. "
+           "미래에셋 차트의 근사 재현이며, 투자 판단은 본인 책임입니다.")
