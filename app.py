@@ -4,6 +4,7 @@ import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import FinanceDataReader as fdr
+import json
 import streamlit.components.v1 as components
 
 st.set_page_config(page_title="추세전환/사이클 차트", layout="wide", initial_sidebar_state="collapsed")
@@ -16,12 +17,13 @@ st.markdown("""<style>
 with st.expander("⚙️ 설정", expanded=False):
     c1, c2, c3 = st.columns(3)
     code = c1.text_input("종목코드", "278530")
-    disp = c2.number_input("화면 표시 기간(거래일)", 60, 600, 100, 10)
-    calc = c3.number_input("계산 기간(거래일)", 120, 2000, 720, 50,
+    disp = c2.number_input("처음 보이는 기간(거래일, 60~180)", 60, 180, 120, 10,
+                           help="차트에서 두 손가락으로 벌리거나 모으면 60~180일 사이에서 확대·축소됩니다.")
+    calc = c3.number_input("계산 기간(거래일)", 120, 2000, 500, 50,
                            help="직선/곡선 계산에 쓰는 기간. 직선추세 기울기를 맞출 때 조절하세요.")
     c4, c5, c6 = st.columns(3)
     lam = c4.select_slider("HP필터 λ (클수록 곡선이 완만)",
-                           options=[5e3, 6e3, 7e3, 8e3, 9e3, 1e4, 2e4, 5e4, 1e5, 3e5, 1e6], value=8e3,
+                           options=[1e3, 3e3, 1e4, 2e4, 5e4, 1e5, 3e5, 1e6], value=1e4,
                            format_func=lambda v: f"{v:,.0f}")
     kmul = c5.slider("상·하한 폭 (σ 배수, 90%=1.645)", 0.5, 3.0, 1.4, 0.005)
     band_pct = c6.number_input("상·하한 폭 직접 지정(%) · 0이면 σ방식", 0.0, 30.0, 0.0, 0.1)
@@ -58,7 +60,7 @@ def fit_cycle(r: np.ndarray):
     return best
 
 
-calc = max(int(calc), int(disp))
+calc = max(int(calc), 180)
 try:
     df = load(code.strip(), calc)
 except Exception as e:
@@ -85,7 +87,8 @@ upper, lower = curve * (1 + width), curve * (1 - width)
 resid = y - curve
 
 # 화면에는 최근 disp일만 표시
-D = int(min(disp, n))
+D = int(min(180, n))
+init_span = int(min(disp, D))
 sl = slice(n - D, n)
 dates = df.index.strftime("%Y-%m-%d")[sl]
 yv, linev, curvev, upv, lov = y[sl], line[sl], curve[sl], upper[sl], lower[sl]
@@ -103,7 +106,7 @@ st.markdown(
     f'<span style="font-size:17px;color:{col};padding-bottom:4px">{arrow} {abs(chg):,.0f} &nbsp; {pct:+.2f}%</span>'
     '</div>'
     f'<div style="font-size:13px;color:#888;margin-top:4px">{code.strip()} · 거래량 {vol:,.0f}</div>'
-    f'<div style="font-size:12px;color:#888;margin-top:2px">직선추세 {linev[0]:,.0f}→{linev[-1]:,.0f} · '
+    f'<div style="font-size:12px;color:#888;margin-top:2px">직선추세 {linev[-init_span]:,.0f}→{linev[-1]:,.0f} · '
     f'상한대비 {last / upper[-1] * 100:.1f}% · 하한대비 {last / lower[-1] * 100:.1f}% · 상·하한폭 ±{width * 100:.1f}%</div>',
     unsafe_allow_html=True)
 
@@ -141,8 +144,11 @@ def base_traces(fig):
 
 
 CROSSHAIR_JS = """
-function installCrosshair(gd){
-  gd.style.position='relative';
+function installCrosshair(gd, initSpan, S, B){
+  gd.style.position='relative'; gd.style.touchAction='pan-y';
+  var cats=gd.data[0].x, N=cats.length, MINS=Math.min(60,N), MAXS=Math.min(180,N);
+  var span=Math.max(MINS,Math.min(MAXS,initSpan)), i0=N-span, pending=false, pinch=null;
+
   function mk(css){var d=document.createElement('div');
     d.style.cssText='position:absolute;pointer-events:none;display:none;z-index:50;'+css;
     gd.appendChild(d);return d;}
@@ -152,13 +158,30 @@ function installCrosshair(gd){
   var dl=mk(lab+'transform:translateX(-50%);');
   var pr=mk(lab+'width:50px;transform:translateY(-50%);');
   function hide(){[vl,hl,dl,pr].forEach(function(e){e.style.display='none';});}
+
+  function fmt(c){return c.slice(5).replace('-','.');}
+  function apply(){
+    pending=false;
+    var a=Math.max(0,Math.floor(i0)), b=Math.min(N-1,Math.ceil(i0+span)-1), i, k, v;
+    var lo=Infinity, hi=-Infinity, bl=0, bh=0;
+    for(k=0;k<S.length;k++){for(i=a;i<=b;i++){v=S[k][i]; if(v<lo)lo=v; if(v>hi)hi=v;}}
+    for(i=a;i<=b;i++){v=B[i]; if(v<bl)bl=v; if(v>bh)bh=v;}
+    var pad=(hi-lo)*0.05||1, tv=[], tt=[], idx;
+    for(k=0;k<4;k++){idx=b-Math.round(k*(span-1)/3.6); if(idx>=a){tv.push(cats[idx]); tt.push(fmt(cats[idx]));}}
+    var xr=[i0-0.5,i0+span-0.5];
+    Plotly.relayout(gd,{'xaxis.range':xr,'xaxis2.range':xr,
+      'yaxis.range':[lo-pad,hi+pad],'yaxis2.range':[bl*1.1,bh*1.1||1],
+      'xaxis.tickvals':tv,'xaxis.ticktext':tt,'xaxis2.tickvals':tv,'xaxis2.ticktext':tt});
+  }
+  function schedule(){if(!pending){pending=true;requestAnimationFrame(apply);}}
+
   function move(cx,cy){
     var r=gd.getBoundingClientRect(), x=cx-r.left, y=cy-r.top;
     var fl=gd._fullLayout, s=fl._size, xa=fl.xaxis, ya=fl.yaxis, yb=fl.yaxis2;
     if(x<s.l||x>s.l+s.w||y<s.t||y>s.t+s.h){hide();return;}
-    var cats=gd.data[0].x, n=cats.length, lo=xa.range[0], hi=xa.range[1];
+    var lo=xa.range[0], hi=xa.range[1];
     var idx=Math.round((x-xa._offset)/xa._length*(hi-lo)+lo);
-    idx=Math.max(0,Math.min(n-1,idx));
+    idx=Math.max(0,Math.min(N-1,idx));
     var xs=xa._offset+(idx-lo)/(hi-lo)*xa._length;
     var ax=(y>=yb._offset)?yb:ya;
     var v=ax.range[1]-(y-ax._offset)/ax._length*(ax.range[1]-ax.range[0]);
@@ -169,10 +192,37 @@ function installCrosshair(gd){
     dl.style.top=(ya._offset+ya._length+2)+'px'; dl.textContent=cats[idx];
     pr.style.display='block'; pr.style.left=(s.l+s.w+2)+'px'; pr.style.top=y+'px'; pr.textContent=txt;
   }
+
+  function dist(t){var dx=t[0].clientX-t[1].clientX, dy=t[0].clientY-t[1].clientY; return Math.sqrt(dx*dx+dy*dy);}
+  function fracOf(clientX){
+    var r=gd.getBoundingClientRect(), s=gd._fullLayout._size;
+    return Math.max(0,Math.min(1,(clientX-r.left-s.l)/s.w));
+  }
   gd.addEventListener('mousemove',function(e){move(e.clientX,e.clientY);});
   gd.addEventListener('mouseleave',hide);
-  gd.addEventListener('touchstart',function(e){var t=e.touches[0];move(t.clientX,t.clientY);},{passive:true});
-  gd.addEventListener('touchmove',function(e){var t=e.touches[0];move(t.clientX,t.clientY);},{passive:true});
+  gd.addEventListener('touchstart',function(e){
+    if(e.touches.length===2){
+      hide();
+      var f=fracOf((e.touches[0].clientX+e.touches[1].clientX)/2);
+      pinch={d:dist(e.touches),span:span,anchor:i0+f*span};
+    } else if(e.touches.length===1){pinch=null; move(e.touches[0].clientX,e.touches[0].clientY);}
+  },{passive:true});
+  gd.addEventListener('touchmove',function(e){
+    if(e.touches.length===2 && pinch){
+      e.preventDefault();
+      var f=fracOf((e.touches[0].clientX+e.touches[1].clientX)/2);
+      var ns=Math.max(MINS,Math.min(MAXS,pinch.span*pinch.d/dist(e.touches)));
+      span=ns; i0=Math.max(0,Math.min(N-ns,pinch.anchor-f*ns)); schedule();
+    } else if(e.touches.length===1 && !pinch){move(e.touches[0].clientX,e.touches[0].clientY);}
+  },{passive:false});
+  gd.addEventListener('touchend',function(e){if(e.touches.length<2)pinch=null;});
+  gd.addEventListener('wheel',function(e){   // PC: Ctrl + 마우스휠(또는 트랙패드 핀치)
+    if(!e.ctrlKey)return; e.preventDefault();
+    var f=fracOf(e.clientX), anchor=i0+f*span;
+    var ns=Math.max(MINS,Math.min(MAXS,span*(e.deltaY>0?1.1:0.9)));
+    span=ns; i0=Math.max(0,Math.min(N-ns,anchor-f*ns)); schedule();
+  },{passive:false});
+  apply();
 }
 """
 
@@ -213,12 +263,15 @@ def finish(fig, low_label):
     return fig
 
 
-def show(fig, div_id):
-    """십자선(가로=가격, 세로=날짜)을 얹어 차트를 표시"""
+def show(fig, div_id, bars):
+    """십자선 + 손가락 확대/축소(60~180일)를 얹어 차트를 표시"""
+    series = [np.asarray(v, dtype=float).tolist() for v in (yv, linev, curvev, upv, lov)]
+    post = "installCrosshair(document.getElementById('{plot_id}'), %d, %s, %s);" % (
+        init_span, json.dumps(series), json.dumps(np.asarray(bars, dtype=float).tolist()))
     html = "<script>" + CROSSHAIR_JS + "</script>" + fig.to_html(
         full_html=False, include_plotlyjs="cdn", div_id=div_id,
         config={"displayModeBar": False, "responsive": True, "scrollZoom": False},
-        post_script="installCrosshair(document.getElementById('{plot_id}'));")
+        post_script=post)
     components.html(html, height=640)
 
 
@@ -230,7 +283,7 @@ with tab1:
     cv = curvev - curvev.min()
     fig.add_trace(go.Bar(x=dates, y=cv, marker_color=direction_colors(curvev),
                          name="곡선추세 방향", showlegend=False), row=2, col=1)
-    show(finish(fig, "곡선추세 방향"), "chart_trend")
+    show(finish(fig, "곡선추세 방향"), "chart_trend", cv)
     st.caption("하단 봉: 곡선추세가 상승 중이면 빨강, 하락 중이면 파랑 (추세 전환 시점 확인용)")
 
 with tab2:
@@ -240,7 +293,7 @@ with tab2:
     base_traces(fig2)
     fig2.add_trace(go.Bar(x=dates, y=cyc, marker_color=direction_colors(cyc),
                           name="싸이클", showlegend=False), row=2, col=1)
-    show(finish(fig2, "싸이클"), "chart_cycle")
+    show(finish(fig2, "싸이클"), "chart_cycle", cyc)
     st.caption(f"추정 최적 주기 약 {P:.1f}거래일 · 잔차 설명력(R²) {r2 * 100:.0f}%. "
                "싸이클의 상승/하락은 추세의 상승/하락과 무관하며, 추세선보다 설명력이 낮은 보조 지표입니다.")
 
