@@ -12,7 +12,8 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="추세전환/사이클 차트", layout="wide", initial_sidebar_state="collapsed")
 st.markdown("""<style>
 .block-container{padding:0.8rem 0.4rem 1rem 0.4rem;max-width:100%;}
-header,[data-testid="stHeader"],[data-testid="stToolbar"],[data-testid="stDecoration"],footer{display:none !important;}
+header,[data-testid="stHeader"],[data-testid="stToolbar"],[data-testid="stDecoration"],footer,
+[data-testid="manage-app-button"],[class*="_profileContainer_"],[class*="viewerBadge"],[class*="_terminalButton_"],[class*="_gzau3_"]{display:none !important;}
 </style>""", unsafe_allow_html=True)
 
 # ───────────── 차트 계산 설정(고정값) ─────────────
@@ -231,7 +232,7 @@ def base_traces(fig):
 
 CROSSHAIR_JS = """
 function installCrosshair(gd, initSpan, S, B){
-  var LP_MS=1500;          // 길게 눌러 진동이 오기까지의 시간(ms)
+  var LP_MS=500;           // 길게 눌러 진동이 오기까지의 시간(ms)
   var CROSS_DELAY_MS=150;  // 진동 후 십자선이 나타나기까지의 시간(ms) (진동 → 십자선 순서 맞춤)
   var PAN_GAIN=1.5;        // 손가락 이동 속도 배율
   var ZOOM_GAIN=1.5;       // 확대/축소 속도 배율
@@ -467,7 +468,7 @@ with tab1:
     fig.add_trace(go.Bar(x=dates, y=cv, marker_color=direction_colors(curvev),
                          name="곡선추세 방향", showlegend=False), row=2, col=1)
     show(finish(fig, "곡선추세 방향"), "chart_trend", cv)
-    st.caption("조작: 좌우로 밀기=기간 이동 · 길게 누름(진동)=십자선 · 두 손가락 벌리기/모으기 또는 ＋/－=확대·축소 · 두 번 톡(더블클릭)=기본값. "
+    st.caption("조작: 좌우로 밀기=기간 이동 · 길게 누름(0.5초, 진동)=십자선 · 두 손가락 벌리기/모으기 또는 ＋/－=확대·축소 · 두 번 톡(더블클릭)=기본값. "
                "하단 봉: 곡선추세가 상승 중이면 빨강, 하락 중이면 파랑.")
 
 with tab2:
@@ -481,4 +482,5 @@ with tab2:
     st.caption(f"추정 최적 주기 약 {P:.1f}거래일 · 잔차 설명력(R²) {r2 * 100:.0f}%. "
                "싸이클의 상승/하락은 추세의 상승/하락과 무관하며, 추세선보다 설명력이 낮은 보조 지표입니다.")
 
-st.caption("투자 판단은 본인 책임입니다.")
+st.caption("HP필터 특성상 새 데이터가 추가되면 과거 곡선도 다시 계산되어 모양이 바뀝니다. "
+           "미래에셋 차트의 근사 재현이며, 투자 판단은 본인 책임입니다.")
