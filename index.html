@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>추세전환 차트</title>
+<style>
+  /* 아래쪽에서 잘라낼 높이(px). Streamlit 문구/Fullscreen/Manage app이 남아 있으면 값을 키우세요. */
+  :root { --crop: 72px; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #ffffff;
+    overflow: hidden;
+    touch-action: pan-y;          /* 브라우저 화면 확대(핀치) 방지 */
+  }
+  #wrap {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    overflow: hidden;             /* 넘치는 아래쪽 부분을 잘라냄 */
+    background: #ffffff;
+  }
+  #app {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: calc(100% + var(--crop));   /* 화면보다 크게 만들어 하단 요소를 화면 밖으로 밀어냄 */
+    border: 0;
+  }
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <iframe id="app"
+            src="https://moonpower.streamlit.app/?embed=true"
+            title="추세전환 차트"
+            allow="fullscreen"></iframe>
+  </div>
+  <noscript>이 화면을 보려면 자바스크립트가 필요합니다.</noscript>
+</body>
+</html>
