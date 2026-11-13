@@ -7,6 +7,11 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>추세전환 차트</title>
+<!-- 앱 서버와 차트 라이브러리 서버에 미리 연결해 두어 첫 로딩을 조금 줄임 -->
+<link rel="preconnect" href="https://moonpower.streamlit.app" crossorigin>
+<link rel="dns-prefetch" href="https://moonpower.streamlit.app">
+<link rel="preconnect" href="https://cdn.plot.ly" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.plot.ly">
 <style>
   /* 아래쪽에서 잘라낼 높이(px). Streamlit 문구/Fullscreen/Manage app이 남아 있으면 값을 키우세요. */
   :root { --crop: 72px; }
