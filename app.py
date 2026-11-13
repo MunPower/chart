@@ -13,7 +13,9 @@ st.set_page_config(page_title="추세전환/사이클 차트", layout="wide", in
 st.markdown("""<style>
 .block-container{padding:0.8rem 0.4rem 1rem 0.4rem;max-width:100%;}
 header,[data-testid="stHeader"],[data-testid="stToolbar"],[data-testid="stDecoration"],footer,
-[data-testid="manage-app-button"],[class*="_profileContainer_"],[class*="viewerBadge"],[class*="_terminalButton_"],[class*="_gzau3_"]{display:none !important;}
+[data-testid="manage-app-button"],[data-testid="stAppDeployButton"],[data-testid="stStatusWidget"],
+.stAppDeployButton,#stStatusWidget,[class*="_profileContainer_"],[class*="viewerBadge"],
+[class*="_terminalButton_"],[class*="_gzau3_"]{display:none !important;}
 </style>""", unsafe_allow_html=True)
 
 # ───────────── 차트 계산 설정(고정값) ─────────────
