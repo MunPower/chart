@@ -14,8 +14,13 @@ st.markdown("""<style>
 .block-container{padding:0.8rem 0.4rem 1rem 0.4rem;max-width:100%;}
 header,[data-testid="stHeader"],[data-testid="stToolbar"],[data-testid="stDecoration"],footer,
 [data-testid="manage-app-button"],[data-testid="stAppDeployButton"],[data-testid="stStatusWidget"],
-.stAppDeployButton,#stStatusWidget,[class*="_profileContainer_"],[class*="viewerBadge"],
-[class*="_terminalButton_"],[class*="_gzau3_"]{display:none !important;}
+#stStatusWidget,.stAppDeployButton,[class*="_profileContainer_"],[class*="viewerBadge"],
+[class*="_terminalButton_"],[class*="_gzau3_"],
+/* 화면 오른쪽 아래에 고정되어 떠 있는 외부 위젯/배지 숨김 */
+body > div[style*="position: fixed"],
+body > iframe[style*="position: fixed"],
+div[style*="position:fixed"],
+iframe[style*="position:fixed"]{display:none !important;}
 </style>""", unsafe_allow_html=True)
 
 # ───────────── 차트 계산 설정(고정값) ─────────────
