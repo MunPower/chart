@@ -169,22 +169,6 @@ def hp_trend(z: np.ndarray, lam: float) -> np.ndarray:
     return np.linalg.solve(np.eye(n) + lam * D.T @ D, z)
 
 
-def fit_cycle(r: np.ndarray):
-    """잔차에 sin/cos 적합, 설명력(R²)이 가장 높은 주기 탐색"""
-    n = len(r)
-    t = np.arange(n)
-    r0 = r - r.mean()
-    best = (None, -1, None)
-    for P in np.arange(5, min(n, 250) + 0.01, 1.0):
-        X = np.column_stack([np.sin(2 * np.pi * t / P), np.cos(2 * np.pi * t / P), np.ones(n)])
-        beta, *_ = np.linalg.lstsq(X, r, rcond=None)
-        fit = X @ beta
-        r2 = 1 - np.sum((r - fit) ** 2) / np.sum(r0 ** 2)
-        if r2 > best[1]:
-            best = (P, r2, fit)
-    return best
-
-
 calc = max(int(calc), 180)
 mkt = mkts.get(code, "KOSPI")
 idx_sym, idx_name = ("KQ11", "코스닥") if mkt == "KOSDAQ" else ("KS11", "코스피")
@@ -211,14 +195,13 @@ rel = y / curve - 1
 sd_rel = rel.std()
 width = band_pct / 100 if band_pct > 0 else kmul * sd_rel
 upper, lower = curve * (1 + width), curve * (1 - width)
-resid = y - curve
 
 # 화면에는 최근 disp일만 표시
 D = n
 init_span = int(min(disp, D))
 sl = slice(n - D, n)
 dates = df.index.strftime("%Y-%m-%d")[sl]
-yv, linev, curvev, upv, lov = y[sl], line[sl], curve[sl], upper[sl], lower[sl]
+yv, curvev, upv, lov = y[sl], curve[sl], upper[sl], lower[sl]
 
 # ───────────── 지수(코스피/코스닥) 비교선 ─────────────
 idx_arr = None
@@ -228,6 +211,9 @@ try:
         idx_arr = _s.to_numpy(dtype=float)
 except Exception:
     idx_arr = None
+idx_scaled = None
+if idx_arr is not None:     # 처음 열었을 때 맨 왼쪽 종가에 한 번만 맞춘 뒤 고정 (밀거나 확대해도 변하지 않음)
+    idx_scaled = idx_arr * (yv[n - init_span] / idx_arr[n - init_span])
 
 # ───────────── 상단 시세 헤더 ─────────────
 last, prev = y[-1], y[-2]
@@ -253,13 +239,12 @@ def direction_colors(v):
 
 def base_traces(fig):
     fig.add_trace(go.Scatter(x=dates, y=yv, name="수정종가", line=dict(color="#e5484d", width=1.8)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=dates, y=linev, name="직선추세", line=dict(color="magenta", width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=dates, y=curvev, name="곡선추세", line=dict(color="royalblue", width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=dates, y=upv, name="곡선추세상한", line=dict(color="navy", width=1)), row=1, col=1)
     fig.add_trace(go.Scatter(x=dates, y=lov, name="곡선추세하한", line=dict(color="navy", width=1)), row=1, col=1)
-    if idx_arr is not None:      # 5번 트레이스: 지수(맨 왼쪽 종가에 맞춰 환산한 점선)
-        fig.add_trace(go.Scatter(x=dates, y=idx_arr, name=idx_name, xaxis="x", yaxis="y3",
-                                 line=dict(color="#ff0000", width=3, dash="dot")))
+    if idx_scaled is not None:   # 4번 트레이스: 지수(녹색 점선)
+        fig.add_trace(go.Scatter(x=dates, y=idx_scaled, name=idx_name,
+                                 line=dict(color="#00a651", width=3, dash="dot")), row=1, col=1)
 
 
 CROSSHAIR_JS = """
@@ -270,7 +255,6 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
   var ZOOM_GAIN=1.5;       // 확대/축소 속도 배율
   var SAME_BAND=2;         // 종목-지수 수익률 차이가 ±이 값(%p) 이내면 '비슷'
   var idxOn=true;          // 지수 비교선 표시 여부
-  var lastRatio=1, fixTries=0, devPct=0;
   // 브라우저(앱 브라우저)가 두 손가락으로 화면 전체를 확대하지 못하게 막기
   try{
     var pd=window.parent.document, mv=pd.querySelector('meta[name=viewport]');
@@ -302,25 +286,6 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
   if(IDX)sm.style.display='block';
   var tg=null;
   var dbg=mk('left:4px;top:66px;font:11px sans-serif;color:#c00;background:rgba(255,255,255,.92);padding:2px 4px;max-width:92%;z-index:70;');
-  var dbgl=mk('left:4px;top:52px;font:10px monospace;color:#666;background:rgba(255,255,255,.85);padding:1px 3px;z-index:70;');
-  dbgl.style.display='block';
-  function fixY3(){   // 지수 축 범위가 종목 가격 축과 어긋났으면 바로잡음
-    if(!IDX)return;
-    var fl=gd._fullLayout, r1=fl.yaxis.range, r3=fl.yaxis3&&fl.yaxis3.range;
-    if(!r3)return;
-    var e0=r1[0]/lastRatio, e1=r1[1]/lastRatio;
-    var dev=Math.max(Math.abs(r3[0]-e0),Math.abs(r3[1]-e1))*lastRatio/(r1[1]-r1[0]);
-    devPct=dev*100;
-    if(dev>0.002&&fixTries<3){fixTries++; var q=Plotly.relayout(gd,{'yaxis3.range':[e0,e1]}); if(q&&q.then)q.then(updateDbg,showErr);}
-  }
-  function updateDbg(){
-    try{
-      fixY3();
-      var fl=gd._fullLayout, fd=gd._fullData||[];
-      dbgl.textContent='진단 N='+N+' 선 '+fd.filter(function(t){return t.visible===true;}).length+'/'+fd.length+
-        ' 점선오차 '+devPct.toFixed(2)+'%'+' x:'+fl.xaxis.type+'['+fl.xaxis.range.map(Math.round).join(',')+'] y:['+fl.yaxis.range.map(Math.round).join(',')+']';
-    }catch(e){dbgl.textContent='진단 오류: '+e.message;}
-  }
   function showErr(e){dbg.style.display='block'; dbg.textContent='차트 오류: '+(e&&e.message?e.message:e);}
   function hide(){[vl,hl,dl,pr].forEach(function(e){e.style.display='none';});}
 
@@ -329,13 +294,9 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
   // 보이는 구간의 최고/최저에 맞춰 가격 범위를 즉시 변경 + 지수선을 맨 왼쪽 종가에 맞춰 환산
   function draw(){
     var a=Math.max(0,Math.floor(i0)), b=Math.min(N-1,Math.ceil(i0+span)-1), i, k, v;
-    var lo=Infinity, hi=-Infinity, bl=0, bh=0, ratio=1;
-    if(IDX){
-      ratio=S[0][a]/IDX[a];                     // 지수를 맨 왼쪽 종가에 맞추는 배율
-      if(!isFinite(ratio)||ratio<=0)throw new Error('지수 환산 비율 오류');
-    }
+    var lo=Infinity, hi=-Infinity, bl=0, bh=0;
     for(k=0;k<S.length;k++){for(i=a;i<=b;i++){v=S[k][i]; if(v<lo)lo=v; if(v>hi)hi=v;}}
-    if(IDX&&idxOn){for(i=a;i<=b;i++){v=IDX[i]*ratio; if(v<lo)lo=v; if(v>hi)hi=v;}}
+    if(IDX&&idxOn){for(i=a;i<=b;i++){v=IDX[i]; if(v<lo)lo=v; if(v>hi)hi=v;}}
     for(i=a;i<=b;i++){v=B[i]; if(v<bl)bl=v; if(v>bh)bh=v;}
     if(!isFinite(lo)||!isFinite(hi)||!isFinite(bl)||!isFinite(bh))throw new Error('가격 범위 계산 오류');
     var pad=(hi-lo)*0.06||1;
@@ -346,15 +307,13 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
       'yaxis.range':[lo-pad,hi+pad],'yaxis2.range':[bl*1.1,(bh*1.1)||1],
       'xaxis.tickvals':tv,'xaxis.ticktext':tt,'xaxis2.tickvals':tv,'xaxis2.ticktext':tt};
     if(IDX){
-      lay['yaxis3.range']=[(lo-pad)/ratio,(hi+pad)/ratio];   // 지수 축 범위 = 종목 가격 범위 ÷ 배율 → 지수선이 종목 가격 단위로 겹쳐 보임
       var sr=(S[0][b]/S[0][a]-1)*100, ir=(IDX[b]/IDX[a]-1)*100, d=sr-ir;
       var up=d>SAME_BAND, dn=d<-SAME_BAND;
       sm.textContent=IDXNAME+' 대비 '+(d>=0?'+':'')+d.toFixed(1)+'%p '+(up?'강함':(dn?'약함':'비슷'));
       sm.style.color=up?'#e5484d':(dn?'#3b6fd4':'#666');
     }
-    lastRatio=ratio; fixTries=0;
     var p=Plotly.relayout(gd,lay);
-    if(p&&p.then)p.then(updateDbg,showErr);
+    if(p&&p.then)p.then(null,showErr);
     var mk2=span<=40;                        // 확대했을 때는 일별 점을 표시
     if(mk2!==markersOn){markersOn=mk2; Plotly.restyle(gd,{mode:mk2?'lines+markers':'lines','marker.size':4},[0]);}
   }
@@ -421,7 +380,7 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
   btn('－',62,function(){zoomBy(1/0.6);});
   if(IDX){                                  // 지수 비교선 켜기/끄기 버튼 (버튼 글자 = 지수 이름)
     tg=btn(IDXNAME,124,function(){idxOn=!idxOn; paintTg(); try{Plotly.restyle(gd,{visible:[idxOn]},[IT]);}catch(e){showErr(e);} schedule();},46,12);
-    var paintTg=function(){tg.style.color=idxOn?'#d00000':'#999'; tg.style.background=idxOn?'#ffecec':'#f3f3f3'; tg.style.borderColor=idxOn?'#ff0000':'#ccc';};
+    var paintTg=function(){tg.style.color=idxOn?'#007a3d':'#999'; tg.style.background=idxOn?'#e8f8ef':'#f3f3f3'; tg.style.borderColor=idxOn?'#00a651':'#ccc';};
     paintTg();
   }
 
@@ -527,16 +486,12 @@ def finish(fig, low_label):
     fig.add_annotation(xref="paper", yref="paper", x=0.0, y=1.0, xanchor="left", yanchor="bottom",
                        showarrow=False, font=dict(size=11),
                        text=('<span style="color:#e5484d">━ 수정종가</span>  '
-                             '<span style="color:#e020e0">━ 직선</span>  '
                              '<span style="color:#4169e1">━ 곡선</span>  '
                              '<span style="color:#000080">━ 상·하한</span>'))
     # 아래 차트 이름
     fig.add_annotation(xref="paper", yref="paper", x=0.01, y=fig.layout.yaxis2.domain[1],
                        xanchor="left", yanchor="top", showarrow=False,
                        text=low_label, font=dict(size=11, color="#555"))
-    if idx_arr is not None:      # 지수 전용 보조 y축 (눈금 없음). 범위는 자바스크립트가 맞춰 줌
-        fig.update_layout(yaxis3=dict(overlaying="y", side="left", showgrid=False, zeroline=False,
-                                      showticklabels=False, showline=False, ticks=""))
     fig.update_layout(height=620, margin=dict(l=4, r=58, t=(50 if idx_arr is not None else 26), b=22),
                       showlegend=False, bargap=0.05, hovermode=False, dragmode=False,
                       plot_bgcolor="white", paper_bgcolor="white")
@@ -547,12 +502,12 @@ def show(fig, div_id, bars):
     """좌우 이동 + 길게 눌러 십자선 기능을 얹어 차트를 표시"""
     def pack(v):
         return np.round(np.asarray(v, dtype=float), 2).tolist()
-    series = [pack(v) for v in (yv, linev, curvev, upv, lov)]
+    series = [pack(v) for v in (yv, curvev, upv, lov)]
     dump = lambda o: json.dumps(o, separators=(",", ":"))
-    idx_json = dump(pack(idx_arr)) if idx_arr is not None else "null"
+    idx_json = dump(pack(idx_scaled)) if idx_scaled is not None else "null"
     post = "installCrosshair(document.getElementById('{plot_id}'), %d, %s, %s, %s, %d, %s);" % (
         init_span, dump(series), dump(pack(bars)),
-        idx_json, (5 if idx_arr is not None else -1), json.dumps(idx_name))
+        idx_json, (4 if idx_scaled is not None else -1), json.dumps(idx_name))
     html = "<script>" + CROSSHAIR_JS + "</script>" + fig.to_html(
         full_html=False, include_plotlyjs="cdn", div_id=div_id,
         config={"staticPlot": True, "responsive": True},
@@ -560,30 +515,13 @@ def show(fig, div_id, bars):
     components.html(html, height=640)
 
 
-tab1, tab2 = st.tabs(["추세전환차트", "추세사이클차트"])
-
-with tab1:
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.72, 0.28], vertical_spacing=0.06)
-    base_traces(fig)
-    cv = curvev - curvev.min()
-    fig.add_trace(go.Bar(x=dates, y=cv, marker_color=direction_colors(curvev),
-                         name="곡선추세 방향", showlegend=False), row=2, col=1)
-    show(finish(fig, "곡선추세 방향"), "chart_trend", cv)
-    st.caption("조작: 좌우로 밀기=기간 이동 · 길게 누름(0.5초, 진동)=십자선 · 두 손가락 벌리기/모으기 또는 ＋/－=확대·축소 · 두 번 톡(더블클릭)=기본값 · 지수 버튼=비교선(점선) 켜기/끄기. "
-               "하단 봉: 곡선추세가 상승 중이면 빨강, 하락 중이면 파랑.")
-
-with tab2:
-    P, r2, cyc = fit_cycle(resid)
-    cyc = (cyc - cyc.mean())[sl]
-    fig2 = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.72, 0.28], vertical_spacing=0.06)
-    base_traces(fig2)
-    fig2.add_trace(go.Bar(x=dates, y=cyc, marker_color=direction_colors(cyc),
-                          name="싸이클", showlegend=False), row=2, col=1)
-    show(finish(fig2, "싸이클"), "chart_cycle", cyc)
-    st.caption(f"추정 최적 주기 약 {P:.1f}거래일 · 잔차 설명력(R²) {r2 * 100:.0f}%. "
-               "싸이클의 상승/하락은 추세의 상승/하락과 무관하며, 추세선보다 설명력이 낮은 보조 지표입니다.")
-
+fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.72, 0.28], vertical_spacing=0.06)
+base_traces(fig)
+cv = curvev - curvev.min()
+fig.add_trace(go.Bar(x=dates, y=cv, marker_color=direction_colors(curvev),
+                     name="곡선추세 방향", showlegend=False), row=2, col=1)
+show(finish(fig, "곡선추세 방향"), "chart_trend", cv)
+st.caption("조작: 좌우로 밀기=기간 이동 · 길게 누름(0.5초, 진동)=십자선 · 두 손가락 벌리기/모으기 또는 ＋/－=확대·축소 · 두 번 톡(더블클릭)=기본값 · 지수 버튼=비교선(점선) 켜기/끄기. "
+           "하단 봉: 곡선추세가 상승 중이면 빨강, 하락 중이면 파랑.")
 if idx_arr is None:
     st.caption("※ 지수 데이터를 불러오지 못해 비교선 없이 표시 중입니다.")
-st.caption("HP필터 특성상 새 데이터가 추가되면 과거 곡선도 다시 계산되어 모양이 바뀝니다. "
-           "미래에셋 차트의 근사 재현이며, 투자 판단은 본인 책임입니다.")
