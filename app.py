@@ -68,13 +68,16 @@ def listing() -> pd.DataFrame:
         try:
             d = fdr.StockListing(market)
             cc = "Code" if "Code" in d.columns else "Symbol"
-            frames.append(d[[cc, "Name"]].rename(columns={cc: "Code"}))
+            d = d.rename(columns={cc: "Code"})
+            d["Market"] = d["Market"] if "Market" in d.columns else ("ETF" if market == "ETF/KR" else "")
+            frames.append(d[["Code", "Name", "Market"]])
         except Exception:
             pass
     if not frames:
-        return pd.DataFrame(columns=["Code", "Name", "nn", "nk"])
+        return pd.DataFrame(columns=["Code", "Name", "nn", "nk", "mkt"])
     out = pd.concat(frames).dropna().drop_duplicates("Code").reset_index(drop=True)
     out["Code"] = out["Code"].astype(str)
+    out["mkt"] = out["Market"].astype(str).str.upper().map(lambda x: "KOSDAQ" if "KOSDAQ" in x else "KOSPI")
     out["nn"] = out["Name"].map(norm)                       # 원래 이름(정규화)
     out["nk"] = out["Name"].map(lambda x: norm(to_ko(x)))   # 한글 발음 이름(정규화)
     return out
@@ -104,6 +107,7 @@ def search(lst: pd.DataFrame, q: str):
 # ───────────── 종목 이름 + 검색 ─────────────
 lst = listing()
 names = dict(zip(lst["Code"], lst["Name"]))
+mkts = dict(zip(lst["Code"], lst["mkt"]))        # 코스피/코스닥 구분 (ETF는 코스피로 처리)
 names.setdefault(DEFAULT_CODE, "KODEX 200TR")   # 종목 목록을 못 불러와도 이름 표시
 if "code" not in st.session_state:
     st.session_state.code = DEFAULT_CODE
@@ -200,6 +204,17 @@ sl = slice(n - D, n)
 dates = df.index.strftime("%Y-%m-%d")[sl]
 yv, linev, curvev, upv, lov = y[sl], line[sl], curve[sl], upper[sl], lower[sl]
 
+# ───────────── 지수(코스피/코스닥) 비교선 ─────────────
+mkt = mkts.get(code, "KOSPI")
+idx_sym, idx_name = ("KQ11", "코스닥") if mkt == "KOSDAQ" else ("KS11", "코스피")
+idx_arr = None
+try:
+    _s = load(idx_sym, calc)["Close"].reindex(df.index).ffill().bfill()
+    if len(_s) == n and np.isfinite(_s.to_numpy(dtype=float)).all():
+        idx_arr = _s.to_numpy(dtype=float)
+except Exception:
+    idx_arr = None
+
 # ───────────── 상단 시세 헤더 ─────────────
 last, prev = y[-1], y[-2]
 chg = last - prev
@@ -228,14 +243,20 @@ def base_traces(fig):
     fig.add_trace(go.Scatter(x=dates, y=curvev, name="곡선추세", line=dict(color="royalblue", width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=dates, y=upv, name="곡선추세상한", line=dict(color="navy", width=1)), row=1, col=1)
     fig.add_trace(go.Scatter(x=dates, y=lov, name="곡선추세하한", line=dict(color="navy", width=1)), row=1, col=1)
+    if idx_arr is not None:      # 5번 트레이스: 지수(맨 왼쪽 종가에 맞춰 환산한 점선)
+        a0 = n - init_span
+        fig.add_trace(go.Scatter(x=dates, y=idx_arr * (yv[a0] / idx_arr[a0]), name=idx_name,
+                                 line=dict(color="#ff8c00", width=1.3, dash="dot")), row=1, col=1)
 
 
 CROSSHAIR_JS = """
-function installCrosshair(gd, initSpan, S, B){
+function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
   var LP_MS=500;           // 길게 눌러 진동이 오기까지의 시간(ms)
   var CROSS_DELAY_MS=150;  // 진동 후 십자선이 나타나기까지의 시간(ms) (진동 → 십자선 순서 맞춤)
   var PAN_GAIN=1.5;        // 손가락 이동 속도 배율
   var ZOOM_GAIN=1.5;       // 확대/축소 속도 배율
+  var SAME_BAND=2;         // 종목-지수 수익률 차이가 ±이 값(%p) 이내면 '비슷'
+  var idxOn=true;          // 지수 비교선 표시 여부
   // 브라우저(앱 브라우저)가 두 손가락으로 화면 전체를 확대하지 못하게 막기
   try{
     var pd=window.parent.document, mv=pd.querySelector('meta[name=viewport]');
@@ -263,24 +284,37 @@ function installCrosshair(gd, initSpan, S, B){
   var hl=mk('height:0;border-top:1px solid #333;');
   var dl=mk(lab+'transform:translateX(-50%);');
   var pr=mk(lab+'width:50px;transform:translateY(-50%);');
+  var sm=mk('left:4px;top:6px;font:600 12px sans-serif;white-space:nowrap;');   // 지수 대비 요약
+  if(IDX)sm.style.display='block';
   function hide(){[vl,hl,dl,pr].forEach(function(e){e.style.display='none';});}
 
   function fmt(c){return c.slice(5).replace('-','.');}
 
-  // 보이는 구간의 최고/최저에 맞춰 가격 범위를 즉시 변경
+  // 보이는 구간의 최고/최저에 맞춰 가격 범위를 즉시 변경 + 지수선을 맨 왼쪽 종가에 맞춰 환산
   function render(){
     pending=false;
     var a=Math.max(0,Math.floor(i0)), b=Math.min(N-1,Math.ceil(i0+span)-1), i, k, v;
-    var lo=Infinity, hi=-Infinity, bl=0, bh=0;
+    var lo=Infinity, hi=-Infinity, bl=0, bh=0, iv=null;
+    if(IDX){var ratio=S[0][a]/IDX[a]; iv=new Array(N); for(i=0;i<N;i++)iv[i]=IDX[i]*ratio;}
     for(k=0;k<S.length;k++){for(i=a;i<=b;i++){v=S[k][i]; if(v<lo)lo=v; if(v>hi)hi=v;}}
+    if(iv&&idxOn){for(i=a;i<=b;i++){v=iv[i]; if(v<lo)lo=v; if(v>hi)hi=v;}}
     for(i=a;i<=b;i++){v=B[i]; if(v<bl)bl=v; if(v>bh)bh=v;}
     var pad=(hi-lo)*0.06||1;
     var step=Math.max(3,Math.round(span/4)), tv=[], tt=[], idx;
     for(idx=N-1;idx>=a;idx-=step){tv.push(cats[idx]); tt.push(fmt(cats[idx]));}
     var xr=[i0-0.5,i0+span-0.5];
-    Plotly.relayout(gd,{'xaxis.range':xr,'xaxis2.range':xr,
+    var lay={'xaxis.range':xr,'xaxis2.range':xr,
       'yaxis.range':[lo-pad,hi+pad],'yaxis2.range':[bl*1.1,(bh*1.1)||1],
-      'xaxis.tickvals':tv,'xaxis.ticktext':tt,'xaxis2.tickvals':tv,'xaxis2.ticktext':tt});
+      'xaxis.tickvals':tv,'xaxis.ticktext':tt,'xaxis2.tickvals':tv,'xaxis2.ticktext':tt};
+    if(IDX){
+      var sr=(S[0][b]/S[0][a]-1)*100, ir=(IDX[b]/IDX[a]-1)*100, d=sr-ir;
+      var up=d>SAME_BAND, dn=d<-SAME_BAND;
+      sm.textContent=IDXNAME+' 대비 '+(d>=0?'+':'')+d.toFixed(1)+'%p '+(up?'강함':(dn?'약함':'비슷'));
+      sm.style.color=up?'#e5484d':(dn?'#3b6fd4':'#666');
+      Plotly.update(gd, idxOn?{y:[iv],visible:[true]}:{visible:[false]}, lay, [IT]);
+    } else {
+      Plotly.relayout(gd,lay);
+    }
     var mk2=span<=40;                        // 확대했을 때는 일별 점을 표시
     if(mk2!==markersOn){markersOn=mk2; Plotly.restyle(gd,{mode:mk2?'lines+markers':'lines','marker.size':4},[0]);}
   }
@@ -319,18 +353,24 @@ function installCrosshair(gd, initSpan, S, B){
   }
 
   // ── 확대/축소 버튼 (두 손가락 확대가 막히는 폰용) ──
-  function btn(txt,right,fn){
+  function btn(txt,right,fn,w,fs){
     var b=document.createElement('div'); b.textContent=txt;
-    b.style.cssText='position:absolute;top:2px;right:'+right+'px;width:28px;height:22px;line-height:22px;text-align:center;'
-      +'font:600 15px sans-serif;background:#f3f3f3;border:1px solid #ccc;border-radius:4px;z-index:60;cursor:pointer;'
+    b.style.cssText='position:absolute;top:2px;right:'+right+'px;width:'+(w||28)+'px;height:22px;line-height:22px;text-align:center;'
+      +'font:600 '+(fs||15)+'px sans-serif;background:#f3f3f3;border:1px solid #ccc;border-radius:4px;z-index:60;cursor:pointer;'
       +'touch-action:manipulation;user-select:none;-webkit-user-select:none;';
     ['touchstart','touchmove','touchend','mousedown','mousemove','dblclick'].forEach(function(n){
       b.addEventListener(n,function(e){e.stopPropagation();},{passive:true});});
     b.addEventListener('click',function(e){e.stopPropagation();fn();});
     gd.appendChild(b);
+    return b;
   }
   btn('＋',92,function(){zoomBy(0.6);});
   btn('－',62,function(){zoomBy(1/0.6);});
+  if(IDX){                                  // 지수 비교선 켜기/끄기 버튼 (버튼 글자 = 지수 이름)
+    var tg=btn(IDXNAME,124,function(){idxOn=!idxOn; paintTg(); schedule();},46,12);
+    var paintTg=function(){tg.style.color=idxOn?'#e07000':'#999'; tg.style.background=idxOn?'#fff3e0':'#f3f3f3'; tg.style.borderColor=idxOn?'#ff8c00':'#ccc';};
+    paintTg();
+  }
 
   // ── 손가락 ──
   // 바로 좌우로 밀기=기간 이동(한 칸씩 딱딱하게) / 길게 눌러 진동=십자선 / 두 손가락=확대·축소
@@ -441,7 +481,7 @@ def finish(fig, low_label):
     fig.add_annotation(xref="paper", yref="paper", x=0.01, y=fig.layout.yaxis2.domain[1],
                        xanchor="left", yanchor="top", showarrow=False,
                        text=low_label, font=dict(size=11, color="#555"))
-    fig.update_layout(height=620, margin=dict(l=4, r=58, t=26, b=22),
+    fig.update_layout(height=620, margin=dict(l=4, r=58, t=(50 if idx_arr is not None else 26), b=22),
                       showlegend=False, bargap=0.05, hovermode=False, dragmode=False,
                       plot_bgcolor="white", paper_bgcolor="white")
     return fig
@@ -450,8 +490,10 @@ def finish(fig, low_label):
 def show(fig, div_id, bars):
     """좌우 이동 + 길게 눌러 십자선 기능을 얹어 차트를 표시"""
     series = [np.asarray(v, dtype=float).tolist() for v in (yv, linev, curvev, upv, lov)]
-    post = "installCrosshair(document.getElementById('{plot_id}'), %d, %s, %s);" % (
-        init_span, json.dumps(series), json.dumps(np.asarray(bars, dtype=float).tolist()))
+    idx_json = json.dumps(idx_arr.tolist()) if idx_arr is not None else "null"
+    post = "installCrosshair(document.getElementById('{plot_id}'), %d, %s, %s, %s, %d, %s);" % (
+        init_span, json.dumps(series), json.dumps(np.asarray(bars, dtype=float).tolist()),
+        idx_json, (5 if idx_arr is not None else -1), json.dumps(idx_name))
     html = "<script>" + CROSSHAIR_JS + "</script>" + fig.to_html(
         full_html=False, include_plotlyjs="cdn", div_id=div_id,
         config={"staticPlot": True, "responsive": True},
@@ -468,7 +510,7 @@ with tab1:
     fig.add_trace(go.Bar(x=dates, y=cv, marker_color=direction_colors(curvev),
                          name="곡선추세 방향", showlegend=False), row=2, col=1)
     show(finish(fig, "곡선추세 방향"), "chart_trend", cv)
-    st.caption("조작: 좌우로 밀기=기간 이동 · 길게 누름(0.5초, 진동)=십자선 · 두 손가락 벌리기/모으기 또는 ＋/－=확대·축소 · 두 번 톡(더블클릭)=기본값. "
+    st.caption("조작: 좌우로 밀기=기간 이동 · 길게 누름(0.5초, 진동)=십자선 · 두 손가락 벌리기/모으기 또는 ＋/－=확대·축소 · 두 번 톡(더블클릭)=기본값 · 지수 버튼=비교선(점선) 켜기/끄기. "
                "하단 봉: 곡선추세가 상승 중이면 빨강, 하락 중이면 파랑.")
 
 with tab2:
@@ -481,4 +523,6 @@ with tab2:
     show(finish(fig2, "싸이클"), "chart_cycle", cyc)
     st.caption(f"추정 최적 주기 약 {P:.1f}거래일 · 잔차 설명력(R²) {r2 * 100:.0f}%. "
                "싸이클의 상승/하락은 추세의 상승/하락과 무관하며, 추세선보다 설명력이 낮은 보조 지표입니다.")
-st.info("투자 판단은 본인 책임입니다.")
+
+st.caption("HP필터 특성상 새 데이터가 추가되면 과거 곡선도 다시 계산되어 모양이 바뀝니다. "
+           "미래에셋 차트의 근사 재현이며, 투자 판단은 본인 책임입니다.")
