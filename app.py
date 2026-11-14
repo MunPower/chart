@@ -257,9 +257,8 @@ def base_traces(fig):
     fig.add_trace(go.Scatter(x=dates, y=upv, name="곡선추세상한", line=dict(color="navy", width=1)), row=1, col=1)
     fig.add_trace(go.Scatter(x=dates, y=lov, name="곡선추세하한", line=dict(color="navy", width=1)), row=1, col=1)
     if idx_arr is not None:      # 5번 트레이스: 지수(맨 왼쪽 종가에 맞춰 환산한 점선)
-        a0 = n - init_span
-        fig.add_trace(go.Scatter(x=dates, y=idx_arr * (yv[a0] / idx_arr[a0]), name=idx_name,
-                                 line=dict(color="#ff8c00", width=1.3, dash="dot")), row=1, col=1)
+        fig.add_trace(go.Scatter(x=dates, y=idx_arr, name=idx_name, xaxis="x", yaxis="y3",
+                                 line=dict(color="#ff8c00", width=1.3, dash="dot")))
 
 
 CROSSHAIR_JS = """
@@ -299,19 +298,34 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
   var pr=mk(lab+'width:50px;transform:translateY(-50%);');
   var sm=mk('left:4px;top:6px;font:600 12px sans-serif;white-space:nowrap;');   // 지수 대비 요약
   if(IDX)sm.style.display='block';
+  var tg=null;
+  var dbg=mk('left:4px;top:66px;font:11px sans-serif;color:#c00;background:rgba(255,255,255,.92);padding:2px 4px;max-width:92%;z-index:70;');
+  var dbgl=mk('left:4px;top:52px;font:10px monospace;color:#666;background:rgba(255,255,255,.85);padding:1px 3px;z-index:70;');
+  dbgl.style.display='block';
+  function updateDbg(){
+    try{
+      var fl=gd._fullLayout, fd=gd._fullData||[];
+      dbgl.textContent='진단 N='+N+' 선 '+fd.filter(function(t){return t.visible===true;}).length+'/'+fd.length+
+        ' x:'+fl.xaxis.type+'['+fl.xaxis.range.map(Math.round).join(',')+'] y:['+fl.yaxis.range.map(Math.round).join(',')+']';
+    }catch(e){dbgl.textContent='진단 오류: '+e.message;}
+  }
+  function showErr(e){dbg.style.display='block'; dbg.textContent='차트 오류: '+(e&&e.message?e.message:e);}
   function hide(){[vl,hl,dl,pr].forEach(function(e){e.style.display='none';});}
 
   function fmt(c){return c.slice(5).replace('-','.');}
 
   // 보이는 구간의 최고/최저에 맞춰 가격 범위를 즉시 변경 + 지수선을 맨 왼쪽 종가에 맞춰 환산
-  function render(){
-    pending=false;
+  function draw(){
     var a=Math.max(0,Math.floor(i0)), b=Math.min(N-1,Math.ceil(i0+span)-1), i, k, v;
-    var lo=Infinity, hi=-Infinity, bl=0, bh=0, iv=null;
-    if(IDX){var ratio=S[0][a]/IDX[a]; iv=new Array(N); for(i=0;i<N;i++)iv[i]=IDX[i]*ratio;}
+    var lo=Infinity, hi=-Infinity, bl=0, bh=0, ratio=1;
+    if(IDX){
+      ratio=S[0][a]/IDX[a];                     // 지수를 맨 왼쪽 종가에 맞추는 배율
+      if(!isFinite(ratio)||ratio<=0)throw new Error('지수 환산 비율 오류');
+    }
     for(k=0;k<S.length;k++){for(i=a;i<=b;i++){v=S[k][i]; if(v<lo)lo=v; if(v>hi)hi=v;}}
-    if(iv&&idxOn){for(i=a;i<=b;i++){v=iv[i]; if(v<lo)lo=v; if(v>hi)hi=v;}}
+    if(IDX&&idxOn){for(i=a;i<=b;i++){v=IDX[i]*ratio; if(v<lo)lo=v; if(v>hi)hi=v;}}
     for(i=a;i<=b;i++){v=B[i]; if(v<bl)bl=v; if(v>bh)bh=v;}
+    if(!isFinite(lo)||!isFinite(hi)||!isFinite(bl)||!isFinite(bh))throw new Error('가격 범위 계산 오류');
     var pad=(hi-lo)*0.06||1;
     var step=Math.max(3,Math.round(span/4)), tv=[], tt=[], idx;
     for(idx=N-1;idx>=a;idx-=step){tv.push(cats[idx]); tt.push(fmt(cats[idx]));}
@@ -320,16 +334,28 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
       'yaxis.range':[lo-pad,hi+pad],'yaxis2.range':[bl*1.1,(bh*1.1)||1],
       'xaxis.tickvals':tv,'xaxis.ticktext':tt,'xaxis2.tickvals':tv,'xaxis2.ticktext':tt};
     if(IDX){
+      lay['yaxis3.range']=[(lo-pad)/ratio,(hi+pad)/ratio];   // 지수 축 범위 = 종목 가격 범위 ÷ 배율 → 지수선이 종목 가격 단위로 겹쳐 보임
       var sr=(S[0][b]/S[0][a]-1)*100, ir=(IDX[b]/IDX[a]-1)*100, d=sr-ir;
       var up=d>SAME_BAND, dn=d<-SAME_BAND;
       sm.textContent=IDXNAME+' 대비 '+(d>=0?'+':'')+d.toFixed(1)+'%p '+(up?'강함':(dn?'약함':'비슷'));
       sm.style.color=up?'#e5484d':(dn?'#3b6fd4':'#666');
-      Plotly.update(gd, idxOn?{y:[iv],visible:[true]}:{visible:[false]}, lay, [IT]);
-    } else {
-      Plotly.relayout(gd,lay);
     }
+    var p=Plotly.relayout(gd,lay);
+    if(p&&p.then)p.then(updateDbg,showErr);
     var mk2=span<=40;                        // 확대했을 때는 일별 점을 표시
     if(mk2!==markersOn){markersOn=mk2; Plotly.restyle(gd,{mode:mk2?'lines+markers':'lines','marker.size':4},[0]);}
+  }
+  function render(){
+    pending=false;
+    try{ draw(); }
+    catch(e){                                // 지수 부분에서 문제가 생겨도 차트는 계속 그리도록 지수 기능만 끔
+      showErr(e);
+      if(IDX){
+        IDX=null; sm.style.display='none'; if(tg)tg.style.display='none';
+        try{ Plotly.restyle(gd,{visible:[false]},[IT]); }catch(e1){}
+        try{ draw(); }catch(e2){ showErr(e2); }
+      }
+    }
   }
   function schedule(){if(!pending){pending=true;requestAnimationFrame(render);}}
 
@@ -341,6 +367,7 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
     var idx=Math.round((x-xa._offset)/xa._length*(hi-lo)+lo);
     idx=Math.max(0,Math.min(N-1,idx));
     var xs=xa._offset+(idx-lo)/(hi-lo)*xa._length;
+    if(!isFinite(xs))return;
     var ax=(y>=yb._offset)?yb:ya;
     var v=ax.range[1]-(y-ax._offset)/ax._length*(ax.range[1]-ax.range[0]);
     var txt=Math.round(v).toLocaleString('en-US');
@@ -380,7 +407,7 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
   btn('＋',92,function(){zoomBy(0.6);});
   btn('－',62,function(){zoomBy(1/0.6);});
   if(IDX){                                  // 지수 비교선 켜기/끄기 버튼 (버튼 글자 = 지수 이름)
-    var tg=btn(IDXNAME,124,function(){idxOn=!idxOn; paintTg(); schedule();},46,12);
+    tg=btn(IDXNAME,124,function(){idxOn=!idxOn; paintTg(); try{Plotly.restyle(gd,{visible:[idxOn]},[IT]);}catch(e){showErr(e);} schedule();},46,12);
     var paintTg=function(){tg.style.color=idxOn?'#e07000':'#999'; tg.style.background=idxOn?'#fff3e0':'#f3f3f3'; tg.style.borderColor=idxOn?'#ff8c00':'#ccc';};
     paintTg();
   }
@@ -494,6 +521,9 @@ def finish(fig, low_label):
     fig.add_annotation(xref="paper", yref="paper", x=0.01, y=fig.layout.yaxis2.domain[1],
                        xanchor="left", yanchor="top", showarrow=False,
                        text=low_label, font=dict(size=11, color="#555"))
+    if idx_arr is not None:      # 지수 전용 보조 y축 (눈금 없음). 범위는 자바스크립트가 맞춰 줌
+        fig.update_layout(yaxis3=dict(overlaying="y", side="left", showgrid=False, zeroline=False,
+                                      showticklabels=False, showline=False, ticks=""))
     fig.update_layout(height=620, margin=dict(l=4, r=58, t=(50 if idx_arr is not None else 26), b=22),
                       showlegend=False, bargap=0.05, hovermode=False, dragmode=False,
                       plot_bgcolor="white", paper_bgcolor="white")
