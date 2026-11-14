@@ -64,16 +64,17 @@ def to_ko(name: str) -> str:
 @st.cache_data(ttl=86400, show_spinner=False)
 def listing() -> pd.DataFrame:
     """종목명 검색용 목록 (주식 + ETF)"""
-    frames = []
-    for market in ("KRX", "ETF/KR"):
+    def one(market):
         try:
             d = fdr.StockListing(market)
             cc = "Code" if "Code" in d.columns else "Symbol"
             d = d.rename(columns={cc: "Code"})
             d["Market"] = d["Market"] if "Market" in d.columns else ("ETF" if market == "ETF/KR" else "")
-            frames.append(d[["Code", "Name", "Market"]])
+            return d[["Code", "Name", "Market"]]
         except Exception:
-            pass
+            return None
+    with ThreadPoolExecutor(max_workers=2) as ex:                  # 두 목록을 동시에 받아 대기 시간 단축
+        frames = [f for f in ex.map(one, ("KRX", "ETF/KR")) if f is not None]
     if not frames:
         return pd.DataFrame(columns=["Code", "Name", "nn", "nk", "mkt"])
     out = pd.concat(frames).dropna().drop_duplicates("Code").reset_index(drop=True)
@@ -141,20 +142,20 @@ name_ph.markdown(
     f'<span style="font-size:13px;color:#888;font-weight:400">{html.escape(code)}</span></div>',
     unsafe_allow_html=True)
 
-@st.cache_data(ttl=600)
-def load(code: str, days: int) -> pd.DataFrame:
-    start = (pd.Timestamp.today() - pd.Timedelta(days=int(days * 1.6) + 10)).strftime("%Y-%m-%d")
-    return fdr.DataReader(code, start).tail(int(days))
-
-
 @st.cache_data(ttl=600, show_spinner=False)
-def load_index(sym: str, days: int) -> pd.DataFrame:
-    """지수 시세. 10초 안에 못 받으면 예외를 내서(캐시되지 않음) 차트가 멈추지 않게 함"""
+def load_both(code: str, idx_sym: str, days: int):
+    """종목과 지수 시세를 동시에 받아 온다. 지수는 8초 안에 못 받으면 None(차트는 지수선 없이 표시)"""
     start = (pd.Timestamp.today() - pd.Timedelta(days=int(days * 1.6) + 10)).strftime("%Y-%m-%d")
-    ex = ThreadPoolExecutor(max_workers=1)
-    fut = ex.submit(fdr.DataReader, sym, start)
+    ex = ThreadPoolExecutor(max_workers=2)
+    f_stock = ex.submit(fdr.DataReader, code, start)
+    f_idx = ex.submit(fdr.DataReader, idx_sym, start)
     try:
-        return fut.result(timeout=10).tail(int(days))
+        stock = f_stock.result(timeout=40).tail(int(days))
+        try:
+            idx = f_idx.result(timeout=8).tail(int(days))
+        except Exception:
+            idx = None
+        return stock, idx
     finally:
         ex.shutdown(wait=False)
 
@@ -174,7 +175,7 @@ def fit_cycle(r: np.ndarray):
     t = np.arange(n)
     r0 = r - r.mean()
     best = (None, -1, None)
-    for P in np.arange(5, min(n, 250) + 0.01, 0.5):
+    for P in np.arange(5, min(n, 250) + 0.01, 1.0):
         X = np.column_stack([np.sin(2 * np.pi * t / P), np.cos(2 * np.pi * t / P), np.ones(n)])
         beta, *_ = np.linalg.lstsq(X, r, rcond=None)
         fit = X @ beta
@@ -185,8 +186,10 @@ def fit_cycle(r: np.ndarray):
 
 
 calc = max(int(calc), 180)
+mkt = mkts.get(code, "KOSPI")
+idx_sym, idx_name = ("KQ11", "코스닥") if mkt == "KOSDAQ" else ("KS11", "코스피")
 try:
-    df = load(code.strip(), calc)
+    df, _idf = load_both(code.strip(), idx_sym, calc)
 except Exception as e:
     st.error(f"데이터를 불러오지 못했습니다: {e}")
     st.stop()
@@ -218,11 +221,9 @@ dates = df.index.strftime("%Y-%m-%d")[sl]
 yv, linev, curvev, upv, lov = y[sl], line[sl], curve[sl], upper[sl], lower[sl]
 
 # ───────────── 지수(코스피/코스닥) 비교선 ─────────────
-mkt = mkts.get(code, "KOSPI")
-idx_sym, idx_name = ("KQ11", "코스닥") if mkt == "KOSDAQ" else ("KS11", "코스피")
 idx_arr = None
 try:
-    _s = load_index(idx_sym, calc)["Close"].reindex(df.index).ffill().bfill()
+    _s = _idf["Close"].reindex(df.index).ffill().bfill()
     if len(_s) == n and np.isfinite(_s.to_numpy(dtype=float)).all():
         idx_arr = _s.to_numpy(dtype=float)
 except Exception:
@@ -258,7 +259,7 @@ def base_traces(fig):
     fig.add_trace(go.Scatter(x=dates, y=lov, name="곡선추세하한", line=dict(color="navy", width=1)), row=1, col=1)
     if idx_arr is not None:      # 5번 트레이스: 지수(맨 왼쪽 종가에 맞춰 환산한 점선)
         fig.add_trace(go.Scatter(x=dates, y=idx_arr, name=idx_name, xaxis="x", yaxis="y3",
-                                 line=dict(color="#ff8c00", width=1.3, dash="dot")))
+                                 line=dict(color="#ff0000", width=3, dash="dot")))
 
 
 CROSSHAIR_JS = """
@@ -269,6 +270,7 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
   var ZOOM_GAIN=1.5;       // 확대/축소 속도 배율
   var SAME_BAND=2;         // 종목-지수 수익률 차이가 ±이 값(%p) 이내면 '비슷'
   var idxOn=true;          // 지수 비교선 표시 여부
+  var lastRatio=1, fixTries=0, devPct=0;
   // 브라우저(앱 브라우저)가 두 손가락으로 화면 전체를 확대하지 못하게 막기
   try{
     var pd=window.parent.document, mv=pd.querySelector('meta[name=viewport]');
@@ -302,11 +304,21 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
   var dbg=mk('left:4px;top:66px;font:11px sans-serif;color:#c00;background:rgba(255,255,255,.92);padding:2px 4px;max-width:92%;z-index:70;');
   var dbgl=mk('left:4px;top:52px;font:10px monospace;color:#666;background:rgba(255,255,255,.85);padding:1px 3px;z-index:70;');
   dbgl.style.display='block';
+  function fixY3(){   // 지수 축 범위가 종목 가격 축과 어긋났으면 바로잡음
+    if(!IDX)return;
+    var fl=gd._fullLayout, r1=fl.yaxis.range, r3=fl.yaxis3&&fl.yaxis3.range;
+    if(!r3)return;
+    var e0=r1[0]/lastRatio, e1=r1[1]/lastRatio;
+    var dev=Math.max(Math.abs(r3[0]-e0),Math.abs(r3[1]-e1))*lastRatio/(r1[1]-r1[0]);
+    devPct=dev*100;
+    if(dev>0.002&&fixTries<3){fixTries++; var q=Plotly.relayout(gd,{'yaxis3.range':[e0,e1]}); if(q&&q.then)q.then(updateDbg,showErr);}
+  }
   function updateDbg(){
     try{
+      fixY3();
       var fl=gd._fullLayout, fd=gd._fullData||[];
       dbgl.textContent='진단 N='+N+' 선 '+fd.filter(function(t){return t.visible===true;}).length+'/'+fd.length+
-        ' x:'+fl.xaxis.type+'['+fl.xaxis.range.map(Math.round).join(',')+'] y:['+fl.yaxis.range.map(Math.round).join(',')+']';
+        ' 점선오차 '+devPct.toFixed(2)+'%'+' x:'+fl.xaxis.type+'['+fl.xaxis.range.map(Math.round).join(',')+'] y:['+fl.yaxis.range.map(Math.round).join(',')+']';
     }catch(e){dbgl.textContent='진단 오류: '+e.message;}
   }
   function showErr(e){dbg.style.display='block'; dbg.textContent='차트 오류: '+(e&&e.message?e.message:e);}
@@ -340,6 +352,7 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
       sm.textContent=IDXNAME+' 대비 '+(d>=0?'+':'')+d.toFixed(1)+'%p '+(up?'강함':(dn?'약함':'비슷'));
       sm.style.color=up?'#e5484d':(dn?'#3b6fd4':'#666');
     }
+    lastRatio=ratio; fixTries=0;
     var p=Plotly.relayout(gd,lay);
     if(p&&p.then)p.then(updateDbg,showErr);
     var mk2=span<=40;                        // 확대했을 때는 일별 점을 표시
@@ -408,7 +421,7 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
   btn('－',62,function(){zoomBy(1/0.6);});
   if(IDX){                                  // 지수 비교선 켜기/끄기 버튼 (버튼 글자 = 지수 이름)
     tg=btn(IDXNAME,124,function(){idxOn=!idxOn; paintTg(); try{Plotly.restyle(gd,{visible:[idxOn]},[IT]);}catch(e){showErr(e);} schedule();},46,12);
-    var paintTg=function(){tg.style.color=idxOn?'#e07000':'#999'; tg.style.background=idxOn?'#fff3e0':'#f3f3f3'; tg.style.borderColor=idxOn?'#ff8c00':'#ccc';};
+    var paintTg=function(){tg.style.color=idxOn?'#d00000':'#999'; tg.style.background=idxOn?'#ffecec':'#f3f3f3'; tg.style.borderColor=idxOn?'#ff0000':'#ccc';};
     paintTg();
   }
 
@@ -532,10 +545,13 @@ def finish(fig, low_label):
 
 def show(fig, div_id, bars):
     """좌우 이동 + 길게 눌러 십자선 기능을 얹어 차트를 표시"""
-    series = [np.asarray(v, dtype=float).tolist() for v in (yv, linev, curvev, upv, lov)]
-    idx_json = json.dumps(idx_arr.tolist()) if idx_arr is not None else "null"
+    def pack(v):
+        return np.round(np.asarray(v, dtype=float), 2).tolist()
+    series = [pack(v) for v in (yv, linev, curvev, upv, lov)]
+    dump = lambda o: json.dumps(o, separators=(",", ":"))
+    idx_json = dump(pack(idx_arr)) if idx_arr is not None else "null"
     post = "installCrosshair(document.getElementById('{plot_id}'), %d, %s, %s, %s, %d, %s);" % (
-        init_span, json.dumps(series), json.dumps(np.asarray(bars, dtype=float).tolist()),
+        init_span, dump(series), dump(pack(bars)),
         idx_json, (5 if idx_arr is not None else -1), json.dumps(idx_name))
     html = "<script>" + CROSSHAIR_JS + "</script>" + fig.to_html(
         full_html=False, include_plotlyjs="cdn", div_id=div_id,
