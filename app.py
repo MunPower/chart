@@ -6,6 +6,7 @@ from plotly.subplots import make_subplots
 import FinanceDataReader as fdr
 import json
 import html
+from concurrent.futures import ThreadPoolExecutor
 import re
 import streamlit.components.v1 as components
 
@@ -146,6 +147,18 @@ def load(code: str, days: int) -> pd.DataFrame:
     return fdr.DataReader(code, start).tail(int(days))
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def load_index(sym: str, days: int) -> pd.DataFrame:
+    """지수 시세. 10초 안에 못 받으면 예외를 내서(캐시되지 않음) 차트가 멈추지 않게 함"""
+    start = (pd.Timestamp.today() - pd.Timedelta(days=int(days * 1.6) + 10)).strftime("%Y-%m-%d")
+    ex = ThreadPoolExecutor(max_workers=1)
+    fut = ex.submit(fdr.DataReader, sym, start)
+    try:
+        return fut.result(timeout=10).tail(int(days))
+    finally:
+        ex.shutdown(wait=False)
+
+
 def hp_trend(z: np.ndarray, lam: float) -> np.ndarray:
     """Hodrick-Prescott 필터의 추세 성분: (I + λ D'D) τ = z"""
     n = len(z)
@@ -209,7 +222,7 @@ mkt = mkts.get(code, "KOSPI")
 idx_sym, idx_name = ("KQ11", "코스닥") if mkt == "KOSDAQ" else ("KS11", "코스피")
 idx_arr = None
 try:
-    _s = load(idx_sym, calc)["Close"].reindex(df.index).ffill().bfill()
+    _s = load_index(idx_sym, calc)["Close"].reindex(df.index).ffill().bfill()
     if len(_s) == n and np.isfinite(_s.to_numpy(dtype=float)).all():
         idx_arr = _s.to_numpy(dtype=float)
 except Exception:
@@ -524,5 +537,7 @@ with tab2:
     st.caption(f"추정 최적 주기 약 {P:.1f}거래일 · 잔차 설명력(R²) {r2 * 100:.0f}%. "
                "싸이클의 상승/하락은 추세의 상승/하락과 무관하며, 추세선보다 설명력이 낮은 보조 지표입니다.")
 
+if idx_arr is None:
+    st.caption("※ 지수 데이터를 불러오지 못해 비교선 없이 표시 중입니다.")
 st.caption("HP필터 특성상 새 데이터가 추가되면 과거 곡선도 다시 계산되어 모양이 바뀝니다. "
            "미래에셋 차트의 근사 재현이며, 투자 판단은 본인 책임입니다.")
