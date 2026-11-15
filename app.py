@@ -211,6 +211,11 @@ try:
         idx_arr = _s.to_numpy(dtype=float)
 except Exception:
     idx_arr = None
+idx_note = ""
+if idx_arr is not None:     # 지수 데이터가 종목보다 며칠 일찍 끝나면 알려줌 (마지막 값으로 채워졌다는 뜻)
+    _gap = (df.index.max() - _idf.index.max()).days
+    if _gap >= 1:
+        idx_note = f"※ {idx_name} 데이터가 {_idf.index.max():%Y-%m-%d}까지만 있어 최근 {_gap}일은 마지막 값으로 채웠습니다."
 idx_scaled = None
 if idx_arr is not None:     # 처음 열었을 때 맨 왼쪽 종가에 한 번만 맞춘 뒤 고정 (밀거나 확대해도 변하지 않음)
     idx_scaled = idx_arr * (yv[n - init_span] / idx_arr[n - init_span])
@@ -248,7 +253,7 @@ def base_traces(fig):
 
 
 CROSSHAIR_JS = """
-function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
+function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, ANCH){
   var LP_MS=500;           // 길게 눌러 진동이 오기까지의 시간(ms)
   var CROSS_DELAY_MS=150;  // 진동 후 십자선이 나타나기까지의 시간(ms) (진동 → 십자선 순서 맞춤)
   var PAN_GAIN=1.5;        // 손가락 이동 속도 배율
@@ -282,12 +287,29 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
   var hl=mk('height:0;border-top:1px solid #333;');
   var dl=mk(lab+'transform:translateX(-50%);');
   var pr=mk(lab+'width:50px;transform:translateY(-50%);');
+  var gt=mk(lab+'background:#00a651;font-size:10px;padding:2px 3px;transform:translateY(-50%);z-index:51;');   // 지수 값 태그(오른쪽 축)
+  function f2(v){return Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
   var sm=mk('left:4px;top:6px;font:600 12px sans-serif;white-space:nowrap;');   // 지수 대비 요약
-  if(IDX)sm.style.display='block';
+  var dt=mk('left:4px;top:24px;font:11px sans-serif;color:#666;white-space:nowrap;');   // 계산 근거(기준일부터의 수익률)
+  var ig=mk('left:4px;top:40px;font:600 11px sans-serif;color:#00a651;white-space:nowrap;');   // 지수 값(녹색)
+  if(IDX){sm.style.display='block'; dt.style.display='block'; ig.style.display='block';}
+  var focus=N-1;           // 십자선이 가리키는 날짜(없으면 맨 오른쪽=최근)
+  function sg(v){return (v>=0?'+':'')+v.toFixed(1)+'%';}
+  function md(i){return cats[i].slice(5);}
+  function updateSummary(){   // 지수 점선을 맞춘 기준일(ANCH)부터 선택한 날짜까지의 수익률로 비교
+    if(!IDX)return;
+    var R=IDXRAW||IDX, A=ANCH, cur=focus, F=(cur>=A)?cur:N-1;
+    var sr=(S[0][F]/S[0][A]-1)*100, ir=(R[F]/R[A]-1)*100, d=sr-ir;
+    var up=d>SAME_BAND, dn=d<-SAME_BAND;
+    sm.textContent=IDXNAME+' 대비 '+(d>=0?'+':'')+d.toFixed(1)+'%p '+(up?'강함':(dn?'약함':'비슷'));
+    sm.style.color=up?'#e5484d':(dn?'#3b6fd4':'#666');
+    dt.textContent='종목 '+sg(sr)+' · '+IDXNAME+' '+sg(ir)+'  ('+md(A)+(F===A?'':'→'+md(F))+' 기준)';
+    ig.textContent='● '+cats[cur]+'  '+IDXNAME+' '+f2(R[cur]);
+  }
   var tg=null;
   var dbg=mk('left:4px;top:66px;font:11px sans-serif;color:#c00;background:rgba(255,255,255,.92);padding:2px 4px;max-width:92%;z-index:70;');
   function showErr(e){dbg.style.display='block'; dbg.textContent='차트 오류: '+(e&&e.message?e.message:e);}
-  function hide(){[vl,hl,dl,pr].forEach(function(e){e.style.display='none';});}
+  function hide(){[vl,hl,dl,pr,gt].forEach(function(e){e.style.display='none';}); if(IDX&&focus!==N-1){focus=N-1; updateSummary();}}
 
   function fmt(c){return c.slice(5).replace('-','.');}
 
@@ -306,12 +328,6 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
     var lay={'xaxis.range':xr,'xaxis2.range':xr,
       'yaxis.range':[lo-pad,hi+pad],'yaxis2.range':[bl*1.1,(bh*1.1)||1],
       'xaxis.tickvals':tv,'xaxis.ticktext':tt,'xaxis2.tickvals':tv,'xaxis2.ticktext':tt};
-    if(IDX){
-      var sr=(S[0][b]/S[0][a]-1)*100, ir=(IDX[b]/IDX[a]-1)*100, d=sr-ir;
-      var up=d>SAME_BAND, dn=d<-SAME_BAND;
-      sm.textContent=IDXNAME+' 대비 '+(d>=0?'+':'')+d.toFixed(1)+'%p '+(up?'강함':(dn?'약함':'비슷'));
-      sm.style.color=up?'#e5484d':(dn?'#3b6fd4':'#666');
-    }
     var p=Plotly.relayout(gd,lay);
     if(p&&p.then)p.then(null,showErr);
     var mk2=span<=40;                        // 확대했을 때는 일별 점을 표시
@@ -338,6 +354,7 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
     var lo=xa.range[0], hi=xa.range[1];
     var idx=Math.round((x-xa._offset)/xa._length*(hi-lo)+lo);
     idx=Math.max(0,Math.min(N-1,idx));
+    if(IDX){focus=idx; updateSummary();}
     var xs=xa._offset+(idx-lo)/(hi-lo)*xa._length;
     if(!isFinite(xs))return;
     var ax=(y>=yb._offset)?yb:ya;
@@ -345,8 +362,19 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
     var txt=Math.round(v).toLocaleString('en-US');
     vl.style.cssText+=';display:block;left:'+xs+'px;top:'+s.t+'px;height:'+s.h+'px;';
     hl.style.cssText+=';display:block;left:'+s.l+'px;top:'+y+'px;width:'+s.w+'px;';
-    dl.style.display='block'; dl.style.left=xs+'px';
-    dl.style.top=(ya._offset+ya._length+2)+'px'; dl.textContent=cats[idx];
+    var showI=!!(IDX&&IDXRAW&&idxOn);
+    dl.textContent=cats[idx]+(showI?' ('+IDXNAME+' '+f2(IDXRAW[idx])+')':'');   // 예: 2026-11-05 (코스피 5,600.00)
+    dl.style.display='block'; dl.style.top=(ya._offset+ya._length+2)+'px';
+    var half=(dl.offsetWidth||0)/2, tot=fl.width||gd.clientWidth||0;
+    dl.style.left=(tot?Math.max(half,Math.min(tot-half,xs)):xs)+'px';        // 화면 밖으로 나가지 않게
+    var shown=false;
+    if(showI){                                                              // 지수선 높이에 초록 태그
+      var yy=ya._offset+(ya.range[1]-IDX[idx])/(ya.range[1]-ya.range[0])*ya._length;
+      if(isFinite(yy)&&yy>=ya._offset&&yy<=ya._offset+ya._length){
+        gt.style.display='block'; gt.style.left=(s.l+s.w+2)+'px'; gt.style.top=yy+'px'; gt.textContent=f2(IDXRAW[idx]); shown=true;
+      }
+    }
+    if(!shown)gt.style.display='none';
     pr.style.display='block'; pr.style.left=(s.l+s.w+2)+'px'; pr.style.top=y+'px'; pr.textContent=txt;
   }
   function pxToBars(dx){return dx/gd._fullLayout._size.w*span;}
@@ -458,6 +486,7 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME){
     if(ns===span)ns=clampSpan(span+(e.deltaY>0?1:-1));
     span=ns; i0=clampI0(anchor-f*ns,ns); schedule();
   },{passive:false});
+  updateSummary();
   render();
 }
 """
@@ -492,7 +521,7 @@ def finish(fig, low_label):
     fig.add_annotation(xref="paper", yref="paper", x=0.01, y=fig.layout.yaxis2.domain[1],
                        xanchor="left", yanchor="top", showarrow=False,
                        text=low_label, font=dict(size=11, color="#555"))
-    fig.update_layout(height=620, margin=dict(l=4, r=58, t=(50 if idx_arr is not None else 26), b=22),
+    fig.update_layout(height=620, margin=dict(l=4, r=58, t=(78 if idx_arr is not None else 26), b=22),
                       showlegend=False, bargap=0.05, hovermode=False, dragmode=False,
                       plot_bgcolor="white", paper_bgcolor="white")
     return fig
@@ -505,9 +534,10 @@ def show(fig, div_id, bars):
     series = [pack(v) for v in (yv, curvev, upv, lov)]
     dump = lambda o: json.dumps(o, separators=(",", ":"))
     idx_json = dump(pack(idx_scaled)) if idx_scaled is not None else "null"
-    post = "installCrosshair(document.getElementById('{plot_id}'), %d, %s, %s, %s, %d, %s);" % (
+    raw_json = dump(pack(idx_arr)) if idx_arr is not None else "null"
+    post = "installCrosshair(document.getElementById('{plot_id}'), %d, %s, %s, %s, %d, %s, %s, %d);" % (
         init_span, dump(series), dump(pack(bars)),
-        idx_json, (4 if idx_scaled is not None else -1), json.dumps(idx_name))
+        idx_json, (4 if idx_scaled is not None else -1), json.dumps(idx_name), raw_json, n - init_span)
     html = "<script>" + CROSSHAIR_JS + "</script>" + fig.to_html(
         full_html=False, include_plotlyjs="cdn", div_id=div_id,
         config={"staticPlot": True, "responsive": True},
@@ -525,3 +555,5 @@ st.caption("조작: 좌우로 밀기=기간 이동 · 길게 누름(0.5초, 진�
            "하단 봉: 곡선추세가 상승 중이면 빨강, 하락 중이면 파랑.")
 if idx_arr is None:
     st.caption("※ 지수 데이터를 불러오지 못해 비교선 없이 표시 중입니다.")
+elif idx_note:
+    st.caption(idx_note)
