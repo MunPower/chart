@@ -185,7 +185,7 @@ calc = max(int(calc), 180)
 mkt = mkts.get(code, "KOSPI")
 idx_sym, idx_name = ("KQ11", "코스닥") if mkt == "KOSDAQ" else ("KS11", "코스피")
 try:
-    df, _idf = load_both(code.strip(), idx_sym, calc) + 600
+    df, _idf = load_both(code.strip(), idx_sym, calc)
 except Exception as e:
     status.empty()
     st.error(f"데이터를 불러오지 못했습니다: {e}")
