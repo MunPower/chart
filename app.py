@@ -107,16 +107,21 @@ def search(lst: pd.DataFrame, q: str):
 
 
 # ───────────── 종목 이름 + 검색 ─────────────
-lst = listing()
-names = dict(zip(lst["Code"], lst["Name"]))
-mkts = dict(zip(lst["Code"], lst["mkt"]))        # 코스피/코스닥 구분 (ETF는 코스피로 처리)
-names.setdefault(DEFAULT_CODE, "KODEX 200TR")   # 종목 목록을 못 불러와도 이름 표시
 if "code" not in st.session_state:
     st.session_state.code = DEFAULT_CODE
 
 name_ph = st.empty()
 q = st.text_input("종목 검색", placeholder="🔍 종목코드 또는 종목명 (예: 278530, 삼성전자, 네이버)",
                   label_visibility="collapsed").strip()
+# 종목 목록은 검색할 때(또는 다른 종목을 보고 있을 때)만 불러온다 → 처음 화면이 바로 뜸
+if q or st.session_state.code != DEFAULT_CODE:
+    with st.spinner("종목 목록을 불러오는 중입니다…"):
+        lst = listing()
+else:
+    lst = pd.DataFrame(columns=["Code", "Name", "nn", "nk", "mkt"])
+names = dict(zip(lst["Code"], lst["Name"]))
+mkts = dict(zip(lst["Code"], lst["mkt"]))        # 코스피/코스닥 구분 (ETF는 코스피로 처리)
+names.setdefault(DEFAULT_CODE, "KODEX 200TR")   # 종목 목록 없이도 기본 종목 이름 표시
 if q:
     qu = q.upper()
     if qu in names or (len(q) == 6 and q.isdigit()):
@@ -140,6 +145,13 @@ name = names.get(code, code)
 name_ph.markdown(
     f'<div style="font-size:20px;font-weight:700;line-height:1.3">{html.escape(str(name))} '
     f'<span style="font-size:13px;color:#888;font-weight:400">{html.escape(code)}</span></div>',
+    unsafe_allow_html=True)
+
+# 시세를 받는 동안 "고장난 것처럼" 보이지 않도록 안내 표시 (차트가 나오면 사라짐)
+status = st.empty()
+status.markdown(
+    '<div style="padding:10px 12px;border-radius:8px;background:#fff4dc;color:#8a5a00;font-size:14px;line-height:1.5">'
+    '⏳ 시세를 불러오는 중입니다. 처음 한 번은 20~30초 걸릴 수 있어요. 잠시만 기다려 주세요.</div>',
     unsafe_allow_html=True)
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -175,9 +187,11 @@ idx_sym, idx_name = ("KQ11", "코스닥") if mkt == "KOSDAQ" else ("KS11", "코�
 try:
     df, _idf = load_both(code.strip(), idx_sym, calc)
 except Exception as e:
+    status.empty()
     st.error(f"데이터를 불러오지 못했습니다: {e}")
     st.stop()
 if df.empty or len(df) < 60:
+    status.empty()
     st.warning("데이터가 부족합니다(60개 이상 필요). 종목코드를 확인하세요.")
     st.stop()
 
@@ -258,7 +272,9 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, ANCH){
   var CROSS_DELAY_MS=150;  // 진동 후 십자선이 나타나기까지의 시간(ms) (진동 → 십자선 순서 맞춤)
   var PAN_GAIN=1.5;        // 손가락 이동 속도 배율
   var ZOOM_GAIN=1.5;       // 확대/축소 속도 배율
-  var SAME_BAND=2;         // 종목-지수 수익률 차이가 ±이 값(%p) 이내면 '비슷'
+  var COMPARE_MODE='level'; // 'level'=그날 종목 가격과 그날 지수선(녹색 점선) 비교, 'daily'=그날 등락률끼리 비교
+  var SAME_BAND_LEVEL=2;    // level: 가격 차이가 ±2% 이내면 '보합'
+  var SAME_BAND_DAILY=0.3;  // daily: 등락률 차이가 ±0.3%p 이내면 '보합'
   var idxOn=true;          // 지수 비교선 표시 여부
   // 브라우저(앱 브라우저)가 두 손가락으로 화면 전체를 확대하지 못하게 막기
   try{
@@ -296,15 +312,23 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, ANCH){
   var focus=N-1;           // 십자선이 가리키는 날짜(없으면 맨 오른쪽=최근)
   function sg(v){return (v>=0?'+':'')+v.toFixed(1)+'%';}
   function md(i){return cats[i].slice(5);}
-  function updateSummary(){   // 지수 점선을 맞춘 기준일(ANCH)부터 선택한 날짜까지의 수익률로 비교
+  function pxs(v){return Number(v).toLocaleString('en-US',{maximumFractionDigits:0});}
+  function updateSummary(){   // 선택한 날짜(없으면 최근 날짜)의 종목 가격과 지수로 강함/약함/보합 판단
     if(!IDX)return;
-    var R=IDXRAW||IDX, A=ANCH, cur=focus, F=(cur>=A)?cur:N-1;
-    var sr=(S[0][F]/S[0][A]-1)*100, ir=(R[F]/R[A]-1)*100, d=sr-ir;
-    var up=d>SAME_BAND, dn=d<-SAME_BAND;
-    sm.textContent=IDXNAME+' 대비 '+(d>=0?'+':'')+d.toFixed(1)+'%p '+(up?'강함':(dn?'약함':'비슷'));
+    var R=IDXRAW||IDX, D=focus, d, band, row2, unit;
+    if(COMPARE_MODE==='daily' && D>=1){
+      var sr=(S[0][D]/S[0][D-1]-1)*100, ir=(R[D]/R[D-1]-1)*100;
+      d=sr-ir; band=SAME_BAND_DAILY; unit='%p ';
+      row2='그날 등락 종목 '+sg(sr)+' · '+IDXNAME+' '+sg(ir);
+    } else {
+      d=(S[0][D]/IDX[D]-1)*100; band=SAME_BAND_LEVEL; unit='% ';     // 종목 가격이 지수선보다 몇 % 위/아래인지
+      row2='그날 종목 '+pxs(S[0][D])+' · 지수선 '+pxs(IDX[D]);
+    }
+    var up=d>band, dn=d<-band;
+    sm.textContent=IDXNAME+' 대비 '+(d>=0?'+':'')+d.toFixed(1)+unit+(up?'강함':(dn?'약함':'보합'));
     sm.style.color=up?'#e5484d':(dn?'#3b6fd4':'#666');
-    dt.textContent='종목 '+sg(sr)+' · '+IDXNAME+' '+sg(ir)+'  ('+md(A)+(F===A?'':'→'+md(F))+' 기준)';
-    ig.textContent='● '+cats[cur]+'  '+IDXNAME+' '+f2(R[cur]);
+    dt.textContent=row2;
+    ig.textContent='● '+cats[D]+'  '+IDXNAME+' '+f2(R[D]);
   }
   var tg=null;
   var dbg=mk('left:4px;top:66px;font:11px sans-serif;color:#c00;background:rgba(255,255,255,.92);padding:2px 4px;max-width:92%;z-index:70;');
@@ -551,6 +575,7 @@ cv = curvev - curvev.min()
 fig.add_trace(go.Bar(x=dates, y=cv, marker_color=direction_colors(curvev),
                      name="곡선추세 방향", showlegend=False), row=2, col=1)
 show(finish(fig, "곡선추세 방향"), "chart_trend", cv)
+status.empty()
 st.caption("조작: 좌우로 밀기=기간 이동 · 길게 누름(0.5초, 진동)=십자선 · 두 손가락 벌리기/모으기 또는 ＋/－=확대·축소 · 두 번 톡(더블클릭)=기본값 · 지수 버튼=비교선(점선) 켜기/끄기. "
            "하단 봉: 곡선추세가 상승 중이면 빨강, 하락 중이면 파랑.")
 if idx_arr is None:
