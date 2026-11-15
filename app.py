@@ -181,7 +181,7 @@ def hp_trend(z: np.ndarray, lam: float) -> np.ndarray:
     return np.linalg.solve(np.eye(n) + lam * D.T @ D, z)
 
 
-calc = max(int(calc), 180)
+calc = max(int(calc)+600, 180)
 mkt = mkts.get(code, "KOSPI")
 idx_sym, idx_name = ("KQ11", "코스닥") if mkt == "KOSDAQ" else ("KS11", "코스피")
 try:
