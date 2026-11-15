@@ -6,7 +6,6 @@ from plotly.subplots import make_subplots
 import FinanceDataReader as fdr
 import json
 import html
-import time
 from concurrent.futures import ThreadPoolExecutor
 import re
 import streamlit.components.v1 as components
@@ -152,52 +151,25 @@ name_ph.markdown(
 status = st.empty()
 status.markdown(
     '<div style="padding:10px 12px;border-radius:8px;background:#fff4dc;color:#8a5a00;font-size:14px;line-height:1.5">'
-    '⏳ 시세를 불러오는 중입니다. 처음 한 번은 조금 걸릴 수 있어요. 잠시만 기다려 주세요.</div>',
+    '⏳ 시세를 불러오는 중입니다. 처음 한 번은 20~30초 걸릴 수 있어요. 잠시만 기다려 주세요.</div>',
     unsafe_allow_html=True)
 
-@st.cache_resource
-def _store():
-    """받아 온 시세를 서버 메모리에 계속 저장해 두는 보관함 (앱이 켜져 있는 동안 유지)"""
-    return {}
-
-
-FULL_TTL = 12 * 3600    # 이 시간이 지나면 전체를 다시 받음 (수정주가 변동 대비)
-CHECK_TTL = 120         # 이 시간 안에 다시 열면 서버에 묻지 않고 저장값 사용
-
-
-def _start(days_back: int) -> str:
-    return (pd.Timestamp.today() - pd.Timedelta(days=int(days_back))).strftime("%Y-%m-%d")
-
-
-def _merge(old: pd.DataFrame, rec: pd.DataFrame, days: int):
-    """저장된 시세(old)에 새로 받은 최근 시세(rec)를 이어 붙임. 겹치는 날짜 값이 다르면 None(전체 다시 받기)"""
-    if rec is None or rec.empty:
-        return old
-    ov = old.index.intersection(rec.index)
-    if len(ov):
-        a = old.loc[ov, "Close"].to_numpy(dtype=float)
-        b = rec.loc[ov, "Close"].to_numpy(dtype=float)
-        r = a / b
-        if (not np.all(np.isfinite(r))) or np.max(np.abs(r - 1)) > 0.002:
-            return None
-    out = pd.concat([old[old.index < rec.index.min()], rec])
-    return out[~out.index.duplicated(keep="last")].sort_index().tail(int(days))
-
-
-def get_series(store: dict, sym: str, days: int):
-    """처음엔 전체, 그 뒤로는 저장값 + 새로 생긴 최근 며칠만 받아서 사용. (시세, 방식) 반환"""
-    now = time.time()
-    e = store.get(sym)
-    if e is not None and e["days"] == days and now - e["full_at"] < FULL_TTL:
-        if now - e["chk_at"] < CHECK_TTL:
-            return e["df"], "저장값"
-        merged = _merge(e["df"], fdr.DataReader(sym, _start(20)), days)
-        if merged is not None:
-            e["df"], e["chk_at"] = merged, now
-            return merged, "새 부분만"
-    df = fdr.DataReader(sym, _start(days * 1.6 + 10)).tail(int(days))   # 처음이거나, 오래됐거나, 기준이 달라졌을 때
-    store[sym] = {"df": df, "days": days, "full_at": now, "chk_at": now}
-    return df, "전체"
+@st.cache_data(ttl=600, show_spinner=False)
+def load_both(code: str, idx_sym: str, days: int):
+    """종목과 지수 시세를 동시에 받아 온다. 지수는 8초 안에 못 받으면 None(차트는 지수선 없이 표시)"""
+    start = (pd.Timestamp.today() - pd.Timedelta(days=int(days * 1.6) + 10)).strftime("%Y-%m-%d")
+    ex = ThreadPoolExecutor(max_workers=2)
+    f_stock = ex.submit(fdr.DataReader, code, start)
+    f_idx = ex.submit(fdr.DataReader, idx_sym, start)
+    try:
+        stock = f_stock.result(timeout=40).tail(int(days))
+        try:
+            idx = f_idx.result(timeout=8).tail(int(days))
+        except Exception:
+            idx = None
+        return stock, idx
+    finally:
+        ex.shutdown(wait=False)
 
 
 def hp_trend(z: np.ndarray, lam: float) -> np.ndarray:
@@ -212,24 +184,12 @@ def hp_trend(z: np.ndarray, lam: float) -> np.ndarray:
 calc = max(int(calc), 180)
 mkt = mkts.get(code, "KOSPI")
 idx_sym, idx_name = ("KQ11", "코스닥") if mkt == "KOSDAQ" else ("KS11", "코스피")
-_t_start = time.perf_counter()
-_store_ = _store()
-_ex = ThreadPoolExecutor(max_workers=2)            # 종목과 지수를 동시에 확인
-_f_stock = _ex.submit(get_series, _store_, code.strip(), calc)
-_f_idx = _ex.submit(get_series, _store_, idx_sym, calc)
 try:
-    df, _mode_s = _f_stock.result(timeout=60)
+    df, _idf = load_both(code.strip(), idx_sym, calc)
 except Exception as e:
     status.empty()
     st.error(f"데이터를 불러오지 못했습니다: {e}")
     st.stop()
-try:
-    _idf, _mode_i = _f_idx.result(timeout=8)       # 지수가 늦으면 8초만 기다리고 지수 없이 표시 (받아 둔 건 다음에 사용)
-except Exception:
-    _idf, _mode_i = None, "실패"
-_ex.shutdown(wait=False)
-_t_fetch = time.perf_counter() - _t_start
-_t_after = time.perf_counter()
 if df.empty or len(df) < 60:
     status.empty()
     st.warning("데이터가 부족합니다(60개 이상 필요). 종목코드를 확인하세요.")
@@ -614,11 +574,8 @@ base_traces(fig)
 cv = curvev - curvev.min()
 fig.add_trace(go.Bar(x=dates, y=cv, marker_color=direction_colors(curvev),
                      name="곡선추세 방향", showlegend=False), row=2, col=1)
-_t_chart0 = time.perf_counter()
 show(finish(fig, "곡선추세 방향"), "chart_trend", cv)
 status.empty()
-_t_end = time.perf_counter()
-st.caption(f"⏱ 시세 {_t_fetch:.1f}초 (종목 {_mode_s} · 지수 {_mode_i}) · 계산 {_t_chart0 - _t_after:.1f}초 · 차트 {_t_end - _t_chart0:.1f}초")
 st.caption("조작: 좌우로 밀기=기간 이동 · 길게 누름(0.5초, 진동)=십자선 · 두 손가락 벌리기/모으기 또는 ＋/－=확대·축소 · 두 번 톡(더블클릭)=기본값 · 지수 버튼=비교선(점선) 켜기/끄기. "
            "하단 봉: 곡선추세가 상승 중이면 빨강, 하락 중이면 파랑.")
 if idx_arr is None:
