@@ -18,8 +18,8 @@ header,[data-testid="stHeader"],[data-testid="stToolbar"],[data-testid="stDecora
 </style>""", unsafe_allow_html=True)
 
 # ───────────── 차트 계산 설정(고정값) ─────────────
-disp, calc, lam, kmul, band_pct = 120, 1000, 8e3, 1.6, 0.0
-DEFAULT_CODE = "293490"   # 처음 열 때 보여줄 종목: 카카오게임즈
+disp, calc, lam, kmul, band_pct = 120, 720, 8e3, 1.6, 0.0
+DEFAULT_CODE = "278530"   # 처음 열 때 보여줄 종목: KODEX 200TR
 
 
 # ───────────── 종목 검색 (한글·영문 혼용) ─────────────
