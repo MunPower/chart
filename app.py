@@ -162,9 +162,9 @@ def load_both(code: str, idx_sym: str, days: int):
     f_stock = ex.submit(fdr.DataReader, code, start)
     f_idx = ex.submit(fdr.DataReader, idx_sym, start)
     try:
-        stock = f_stock.result(timeout=40).tail(int(120))
+        stock = f_stock.result(timeout=40).tail(int(days))
         try:
-            idx = f_idx.result(timeout=8).tail(int(120))
+            idx = f_idx.result(timeout=8).tail(int(days))
         except Exception:
             idx = None
         return stock, idx
