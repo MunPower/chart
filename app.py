@@ -18,7 +18,7 @@ header,[data-testid="stHeader"],[data-testid="stToolbar"],[data-testid="stDecora
 </style>""", unsafe_allow_html=True)
 
 # ───────────── 차트 계산 설정(고정값) ─────────────
-disp, calc, lam, kmul, band_pct = 120, 720, 8e3, 1.6, 0.0
+disp, calc, lam, kmul, band_pct = 120, 720, 8e3, 0, 0.0
 DEFAULT_CODE = "278530"   # 처음 열 때 보여줄 종목: KODEX 200TR
 
 
@@ -185,7 +185,7 @@ calc = max(int(calc), 180)
 mkt = mkts.get(code, "KOSPI")
 idx_sym, idx_name = ("KQ11", "코스닥") if mkt == "KOSDAQ" else ("KS11", "코스피")
 try:
-    df, _idf = load_both(code.strip(), idx_sym, 120)
+    df, _idf = load_both(code.strip(), idx_sym, calc)
 except Exception as e:
     status.empty()
     st.error(f"데이터를 불러오지 못했습니다: {e}")
