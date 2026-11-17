@@ -334,10 +334,10 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
         return '<span style="color:'+color+'">'+label+' '+pxs(value)+' ('+pctText+')</span>';
       }
       var prevRawIndex = D > 0 ? R[D-1] : NaN;
-      row2 = coloredValue('시가', OPEN, prevClose) + ' · ' +
-             coloredValue('저가', LOW, prevClose) + ' · ' +
-             coloredValue('종가', S[0], prevClose) + ' · ' +
-             coloredValue('지수', R[D], prevRawIndex);
+      row2 = '<span style="color:#000000">시가 '+pxs(OPEN[D])+'</span> · ' +
+       '<span style="color:#000000">저가 '+pxs(LOW[D])+'</span> · ' +
+       '<span style="color:#000000">종가 '+pxs(S[0][D])+'</span> · ' +
+       coloredValue('지수', R[D], prevRawIndex);
     }
     var up=d>band, dn=d<-band;
     sm.textContent=IDXNAME+' 대비 '+(d>=0?'+':'')+d.toFixed(1)+unit+(up?'강함':(dn?'약함':'보합'));
