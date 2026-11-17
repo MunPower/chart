@@ -324,16 +324,20 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
       // 시가·저가·종가는 전일 종가 대비, 지수선은 전일 지수선 대비 등락률
       var prevClose = D > 0 ? S[0][D-1] : NaN;
       var prevIndex = D > 0 ? IDX[D-1] : NaN;
-      function coloredValue(label, value, base){
-        var pct = (isFinite(base) && base !== 0) ? (value / base - 1) * 100 : NaN;
+      function coloredValue(label, value, base, pctSourceValue){
+        // pctSourceValue가 있으면 실제 원본 지수값으로 등락률을 계산
+        var compareValue = (pctSourceValue !== undefined) ? pctSourceValue : value;
+        var pct = (isFinite(base) && base !== 0 && isFinite(compareValue))
+                    ? (compareValue / base - 1) * 100 : NaN;
         var color = !isFinite(pct) || Math.abs(pct) < 0.0000001 ? '#000000' : (pct > 0 ? '#e5484d' : '#3b6fd4');
         var pctText = isFinite(pct) ? (pct > 0 ? '+' : '') + pct.toFixed(2) + '%' : '—';
         return '<span style="color:'+color+'">'+label+' '+pxs(value)+' ('+pctText+')</span>';
       }
+      var prevRawIndex = D > 0 ? R[D-1] : NaN;
       row2 = coloredValue('시가', OPEN[D], prevClose) + ' · ' +
              coloredValue('저가', LOW[D], prevClose) + ' · ' +
              coloredValue('종가', S[0][D], prevClose) + ' · ' +
-             coloredValue('지수선', IDX[D], prevIndex);
+             coloredValue('지수선', IDX[D], prevRawIndex, R[D]);
     }
     var up=d>band, dn=d<-band;
     sm.textContent=IDXNAME+' 대비 '+(d>=0?'+':'')+d.toFixed(1)+unit+(up?'강함':(dn?'약함':'보합'));
