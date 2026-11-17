@@ -334,9 +334,9 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
         return '<span style="color:'+color+'">'+label+' '+pxs(value)+' ('+pctText+')</span>';
       }
       var prevRawIndex = D > 0 ? R[D-1] : NaN;
-      row2 = coloredValue('시가', OPEN[D], prevClose) + ' · ' +
-             coloredValue('저가', LOW[D], prevClose) + ' · ' +
-             coloredValue('종가', S[0][D], prevClose) + ' · ' +
+      row2 = coloredValue('시가', OPEN, prevClose) + ' · ' +
+             coloredValue('저가', LOW, prevClose) + ' · ' +
+             coloredValue('종가', S[0], prevClose) + ' · ' +
              coloredValue('지수', R[D], prevRawIndex);
     }
     var up=d>band, dn=d<-band;
