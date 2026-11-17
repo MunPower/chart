@@ -267,7 +267,7 @@ def base_traces(fig):
 
 
 CROSSHAIR_JS = """
-function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, ANCH){
+function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LOW, ANCH){
   var LP_MS=500;           // 길게 눌러 진동이 오기까지의 시간(ms)
   var CROSS_DELAY_MS=150;  // 진동 후 십자선이 나타나기까지의 시간(ms) (진동 → 십자선 순서 맞춤)
   var PAN_GAIN=1.5;        // 손가락 이동 속도 배율
@@ -321,7 +321,7 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, ANCH){
       row2='그날 등락 종목 '+sg(sr)+' · '+IDXNAME+' '+sg(ir);
     } else {
       d=(S[0][D]/IDX[D]-1)*100; band=SAME_BAND_LEVEL; unit='% ';     // 종목 가격이 지수선보다 몇 % 위/아래인지
-      row2='그날 종목 '+pxs(S[0][D])+' · 지수선 '+pxs(IDX[D]);
+      row2='시가 '+pxs(OPEN[D])+' · 저가 '+pxs(LOW[D])+' · 종가 '+pxs(S[0][D])+' · 지수선 '+pxs(IDX[D]);
     }
     var up=d>band, dn=d<-band;
     sm.textContent=IDXNAME+' 대비 '+(d>=0?'+':'')+d.toFixed(1)+unit+(up?'강함':(dn?'약함':'보합'));
@@ -551,9 +551,12 @@ def show(fig, div_id, bars):
     dump = lambda o: json.dumps(o, separators=(",", ":"))
     idx_json = dump(pack(idx_scaled)) if idx_scaled is not None else "null"
     raw_json = dump(pack(idx_arr)) if idx_arr is not None else "null"
-    post = "installCrosshair(document.getElementById('{plot_id}'), %d, %s, %s, %s, %d, %s, %s, %d);" % (
+    open_json = dump(pack(df["Open"].to_numpy(dtype=float)[sl]))
+    low_json = dump(pack(df["Low"].to_numpy(dtype=float)[sl]))
+    post = "installCrosshair(document.getElementById('{plot_id}'), %d, %s, %s, %s, %d, %s, %s, %s, %s, %d);" % (
         init_span, dump(series), dump(pack(bars)),
-        idx_json, (4 if idx_scaled is not None else -1), json.dumps(idx_name), raw_json, n - init_span)
+        idx_json, (4 if idx_scaled is not None else -1), json.dumps(idx_name),
+        raw_json, open_json, low_json, n - init_span)
     html = "<script>" + CROSSHAIR_JS + "</script>" + fig.to_html(
         full_html=False, include_plotlyjs="cdn", div_id=div_id,
         config={"staticPlot": True, "responsive": True},
