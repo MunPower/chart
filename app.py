@@ -321,12 +321,28 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
       row2='그날 등락 종목 '+sg(sr)+' · '+IDXNAME+' '+sg(ir);
     } else {
       d=(S[0][D]/IDX[D]-1)*100; band=SAME_BAND_LEVEL; unit='% ';     // 종목 가격이 지수선보다 몇 % 위/아래인지
-      row2='시가 '+pxs(OPEN[D])+' · 저가 '+pxs(LOW[D])+' · 종가 '+pxs(S[0][D])+' · 지수선 '+pxs(IDX[D]);
+      // 시가·저가·종가는 전일 종가 대비, 지수선은 전일 지수선 대비 등락률
+      var prevClose = D > 0 ? S[0][D-1] : NaN;
+      var prevIndex = D > 0 ? IDX[D-1] : NaN;
+      function coloredValue(label, value, base){
+        var pct = (isFinite(base) && base !== 0) ? (value / base - 1) * 100 : NaN;
+        var color = !isFinite(pct) || Math.abs(pct) < 0.0000001 ? '#000000' : (pct > 0 ? '#e5484d' : '#3b6fd4');
+        var pctText = isFinite(pct) ? (pct > 0 ? '+' : '') + pct.toFixed(2) + '%' : '—';
+        return '<span style="color:'+color+'">'+label+' '+pxs(value)+' ('+pctText+')</span>';
+      }
+      row2 = coloredValue('시가', OPEN[D], prevClose) + ' · ' +
+             coloredValue('저가', LOW[D], prevClose) + ' · ' +
+             coloredValue('종가', S[0][D], prevClose) + ' · ' +
+             coloredValue('지수선', IDX[D], prevIndex);
     }
     var up=d>band, dn=d<-band;
     sm.textContent=IDXNAME+' 대비 '+(d>=0?'+':'')+d.toFixed(1)+unit+(up?'강함':(dn?'약함':'보합'));
     sm.style.color=up?'#e5484d':(dn?'#3b6fd4':'#666');
-    dt.textContent=row2;
+    if(COMPARE_MODE==='daily'){
+      dt.textContent=row2;
+    } else {
+      dt.innerHTML=row2;
+    }
     ig.textContent='● '+cats[D]+'  '+IDXNAME+' '+f2(R[D]);
   }
   var tg=null;
