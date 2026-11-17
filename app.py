@@ -301,9 +301,8 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, ANCH){
   var lab='background:#222;color:#fff;font:11px sans-serif;padding:2px 4px;white-space:nowrap;';
   var vl=mk('width:0;border-left:1px solid #333;');
   var hl=mk('height:0;border-top:1px solid #333;');
-  var dl=mk(lab+'transform:translateX(-50%);');
+  var dl=mk(lab+'transform:translateX(-50%);white-space:pre;text-align:center;line-height:1.3;');   // 날짜 + (가격 , 지수) 두 줄
   var pr=mk(lab+'width:50px;transform:translateY(-50%);');
-  var gt=mk(lab+'background:#00a651;font-size:10px;padding:2px 3px;transform:translateY(-50%);z-index:51;');   // 지수 값 태그(오른쪽 축)
   function f2(v){return Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
   var sm=mk('left:4px;top:6px;font:600 12px sans-serif;white-space:nowrap;');   // 지수 대비 요약
   var dt=mk('left:4px;top:24px;font:11px sans-serif;color:#666;white-space:nowrap;');   // 계산 근거(기준일부터의 수익률)
@@ -333,7 +332,7 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, ANCH){
   var tg=null;
   var dbg=mk('left:4px;top:66px;font:11px sans-serif;color:#c00;background:rgba(255,255,255,.92);padding:2px 4px;max-width:92%;z-index:70;');
   function showErr(e){dbg.style.display='block'; dbg.textContent='차트 오류: '+(e&&e.message?e.message:e);}
-  function hide(){[vl,hl,dl,pr,gt].forEach(function(e){e.style.display='none';}); if(IDX&&focus!==N-1){focus=N-1; updateSummary();}}
+  function hide(){[vl,hl,dl,pr].forEach(function(e){e.style.display='none';}); if(IDX&&focus!==N-1){focus=N-1; updateSummary();}}
 
   function fmt(c){return c.slice(5).replace('-','.');}
 
@@ -387,18 +386,11 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, ANCH){
     vl.style.cssText+=';display:block;left:'+xs+'px;top:'+s.t+'px;height:'+s.h+'px;';
     hl.style.cssText+=';display:block;left:'+s.l+'px;top:'+y+'px;width:'+s.w+'px;';
     var showI=!!(IDX&&IDXRAW&&idxOn);
-    dl.textContent=cats[idx]+(showI?' ('+IDXNAME+' '+f2(IDXRAW[idx])+')':'');   // 예: 2026-11-05 (코스피 5,600.00)
+    // 예) 2026-10-20 (줄바꿈) (11,700 , 5,600.00)  → 날짜 / (그날 종목 가격 , 그날 지수)
+    dl.textContent=cats[idx]+'\\n('+pxs(S[0][idx])+(showI?' , '+f2(IDXRAW[idx]):'')+')';
     dl.style.display='block'; dl.style.top=(ya._offset+ya._length+2)+'px';
     var half=(dl.offsetWidth||0)/2, tot=fl.width||gd.clientWidth||0;
     dl.style.left=(tot?Math.max(half,Math.min(tot-half,xs)):xs)+'px';        // 화면 밖으로 나가지 않게
-    var shown=false;
-    if(showI){                                                              // 지수선 높이에 초록 태그
-      var yy=ya._offset+(ya.range[1]-IDX[idx])/(ya.range[1]-ya.range[0])*ya._length;
-      if(isFinite(yy)&&yy>=ya._offset&&yy<=ya._offset+ya._length){
-        gt.style.display='block'; gt.style.left=(s.l+s.w+2)+'px'; gt.style.top=yy+'px'; gt.textContent=f2(IDXRAW[idx]); shown=true;
-      }
-    }
-    if(!shown)gt.style.display='none';
     pr.style.display='block'; pr.style.left=(s.l+s.w+2)+'px'; pr.style.top=y+'px'; pr.textContent=txt;
   }
   function pxToBars(dx){return dx/gd._fullLayout._size.w*span;}
