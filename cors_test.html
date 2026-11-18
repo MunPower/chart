@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>폰 직접 받기 시험</title>
+<style>
+  body { font-family: sans-serif; margin: 14px; line-height: 1.5; color: #222; }
+  h1 { font-size: 18px; margin: 0 0 8px; }
+  .box { border: 1px solid #ddd; border-radius: 8px; padding: 10px; margin: 10px 0; word-break: break-all; }
+  .ok { border-color: #1a9a4a; background: #eefaf2; }
+  .fail { border-color: #d33; background: #fff1f1; }
+  .wait { color: #888; }
+  .name { font-weight: 700; }
+  .small { font-size: 12px; color: #666; }
+  button { font-size: 16px; padding: 8px 14px; }
+  #summary { font-weight: 700; margin: 10px 0; }
+</style>
+</head>
+<body>
+<h1>폰에서 시세 직접 받기 시험</h1>
+<div class="small">이 페이지는 폰 브라우저가 증권 시세 사이트에서 데이터를 직접 받을 수 있는지만 확인합니다. 아무것도 저장하거나 전송하지 않습니다.</div>
+<p><button id="run">다시 시험</button></p>
+<div id="summary">시험 중…</div>
+<div id="out"></div>
+
+<script>
+function ymd(d) {
+  return d.getFullYear() + String(d.getMonth() + 1).padStart(2, "0") + String(d.getDate()).padStart(2, "0");
+}
+var today = ymd(new Date());
+var TESTS = [
+  ["① 네이버 fchart (종목)", "https://fchart.stock.naver.com/sise.nhn?timeframe=day&count=720&requestType=0&symbol=278530"],
+  ["② 네이버 fchart (코스피)", "https://fchart.stock.naver.com/sise.nhn?timeframe=day&count=720&requestType=0&symbol=KOSPI"],
+  ["③ 네이버 모바일 증권", "https://m.stock.naver.com/front-api/external/chart/domestic/info?symbol=278530&requestType=1&startTime=20240101&endTime=" + today + "&timeframe=day"],
+  ["④ 네이버 siseJson", "https://api.finance.naver.com/siseJson.naver?symbol=278530&requestType=1&startTime=20240101&endTime=" + today + "&timeframe=day"],
+  ["⑤ 야후 파이낸스 (참고)", "https://query1.finance.yahoo.com/v8/finance/chart/278530.KS?range=3y&interval=1d"]
+];
+
+function decode(buf) {
+  try { return new TextDecoder("euc-kr").decode(buf); }
+  catch (e) { return new TextDecoder("utf-8").decode(buf); }
+}
+
+function runOne(name, url, box) {
+  var t0 = performance.now();
+  var ctl = new AbortController();
+  var timer = setTimeout(function () { ctl.abort(); }, 15000);
+  return fetch(url, { mode: "cors", signal: ctl.signal })
+    .then(function (r) {
+      return r.arrayBuffer().then(function (buf) {
+        clearTimeout(timer);
+        var ms = Math.round(performance.now() - t0);
+        var txt = decode(buf);
+        var ok = r.ok && buf.byteLength > 200;
+        box.className = "box " + (ok ? "ok" : "fail");
+        box.innerHTML = '<span class="name">' + name + "</span> — " + (ok ? "성공" : "응답이 이상함") +
+          "<br>상태 " + r.status + " · " + buf.byteLength + "바이트 · " + ms + "ms" +
+          '<br><span class="small">' + txt.slice(0, 90).replace(/</g, "&lt;") + "…</span>";
+        return ok;
+      });
+    })
+    .catch(function (e) {
+      clearTimeout(timer);
+      var ms = Math.round(performance.now() - t0);
+      box.className = "box fail";
+      box.innerHTML = '<span class="name">' + name + "</span> — 실패 (" + ms + "ms)<br>" +
+        '<span class="small">' + (e && e.name === "AbortError" ? "15초 안에 응답 없음" :
+        "브라우저가 막았거나(보안 규칙) 연결에 실패했습니다: " + (e && e.message)) + "</span>";
+      return false;
+    });
+}
+
+function runAll() {
+  var out = document.getElementById("out");
+  var summary = document.getElementById("summary");
+  out.innerHTML = "";
+  summary.textContent = "시험 중…";
+  var jobs = TESTS.map(function (t) {
+    var box = document.createElement("div");
+    box.className = "box wait";
+    box.textContent = t[0] + " — 확인 중…";
+    out.appendChild(box);
+    return runOne(t[0], t[1], box);
+  });
+  Promise.all(jobs).then(function (res) {
+    var n = res.filter(Boolean).length;
+    summary.textContent = n > 0
+      ? "성공 " + n + "개 — 브라우저만으로 시세를 받을 수 있는 길이 있습니다."
+      : "성공 0개 — 브라우저가 시세 사이트 접근을 막고 있습니다.";
+  });
+}
+
+document.getElementById("run").onclick = runAll;
+runAll();
+</script>
+</body>
+</html>
