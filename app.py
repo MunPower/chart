@@ -243,7 +243,7 @@ arrow = "▲" if chg > 0 else ("▼" if chg < 0 else "-")
 vol = df["Volume"].iloc[-1]
 
 # ───────────── 매수·매도 표시 (현재가가 곡선추세 상·하한에 닿거나 넘었을 때) ─────────────
-TOUCH_TOL = 0.003      # 상·하한에서 0.3% 안쪽까지 가까워지면 '닿았다'고 봄
+TOUCH_TOL = 0.000      # 상·하한에서 0.3% 안쪽까지 가까워지면 '닿았다'고 봄
 _up, _lo = float(upper[-1]), float(lower[-1])
 _day = f"{df.index[-1]:%m-%d}"
 sig_html = ""
