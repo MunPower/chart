@@ -241,12 +241,36 @@ pct = chg / prev * 100
 col = "#e5484d" if chg > 0 else ("#3b6fd4" if chg < 0 else "#333333")
 arrow = "▲" if chg > 0 else ("▼" if chg < 0 else "-")
 vol = df["Volume"].iloc[-1]
+
+# ───────────── 매수·매도 표시 (현재가가 곡선추세 상·하한에 닿거나 넘었을 때) ─────────────
+TOUCH_TOL = 0.003      # 상·하한에서 0.3% 안쪽까지 가까워지면 '닿았다'고 봄
+_up, _lo = float(upper[-1]), float(lower[-1])
+_day = f"{df.index[-1]:%m-%d}"
+sig_html = ""
+if last >= _up * (1 - TOUCH_TOL):          # 상한에 닿거나 위로 넘음 → 파란색 매도
+    sig_html = (
+        '<div style="flex:1;min-width:130px;text-align:center">'
+        '<div style="font-size:32px;font-weight:800;color:#1a56db;line-height:1.1">매도</div>'
+        f'<div style="font-size:11px;color:#888;margin-top:3px">{_day} 종가가 곡선추세 상한({_up:,.0f})에 닿았거나 넘음 · 참고용</div>'
+        '</div>')
+elif last <= _lo * (1 + TOUCH_TOL):        # 하한에 닿거나 아래로 내려감 → 빨간색 매수
+    sig_html = (
+        '<div style="flex:1;min-width:130px;text-align:center">'
+        '<div style="font-size:32px;font-weight:800;color:#e5484d;line-height:1.1">매수</div>'
+        f'<div style="font-size:11px;color:#888;margin-top:3px">{_day} 종가가 곡선추세 하한({_lo:,.0f})에 닿았거나 내려감 · 참고용</div>'
+        '</div>')
+
 st.markdown(
+    '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">'
+    '<div>'
     '<div style="display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap">'
     f'<span style="font-size:42px;font-weight:700;color:{col};line-height:1">{last:,.0f}</span>'
     f'<span style="font-size:17px;color:{col};padding-bottom:4px">{arrow} {abs(chg):,.0f} &nbsp; {pct:+.2f}%</span>'
     '</div>'
-    f'<div style="font-size:13px;color:#888;margin-top:4px">거래량 {vol:,.0f}</div>',
+    f'<div style="font-size:13px;color:#888;margin-top:4px">거래량 {vol:,.0f}</div>'
+    '</div>'
+    f'{sig_html}'
+    '</div>',
     unsafe_allow_html=True)
 
 # ───────────── 차트 ─────────────
