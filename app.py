@@ -325,10 +325,10 @@ def direction_colors(v):
 
 
 def base_traces(fig):
-    fig.add_trace(go.Scatter(x=dates, y=yv, name="수정종가", line=dict(color="#e5484d", width=1.8)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=dates, y=curvev, name="곡선추세", line=dict(color="royalblue", width=1.5)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=dates, y=upv, name="매도선", line=dict(color="navy", width=1)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=dates, y=lov, name="매수선", line=dict(color="navy", width=1)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=dates, y=yv, name="수정종가", line=dict(color="#111111", width=1.8)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=dates, y=curvev, name="곡선추세", line=dict(color="#111111", width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=dates, y=upv, name="매도선", line=dict(color="#1a56db", width=2.2)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=dates, y=lov, name="매수선", line=dict(color="#e5484d", width=2.2)), row=1, col=1)
     if idx_scaled is not None:   # 4번 트레이스: 지수(녹색 점선)
         fig.add_trace(go.Scatter(x=dates, y=idx_scaled, name=idx_name,
                                  line=dict(color="#00a651", width=3, dash="dot")), row=1, col=1)
@@ -637,9 +637,10 @@ def finish(fig, low_label):
     # 범례(차트 위 한 줄)
     fig.add_annotation(xref="paper", yref="paper", x=0.0, y=1.0, xanchor="left", yanchor="bottom",
                        showarrow=False, font=dict(size=11),
-                       text=('<span style="color:#e5484d">━ 수정종가</span>  '
-                             '<span style="color:#4169e1">━ 곡선</span>  '
-                             '<span style="color:#000080">━ 상·하한</span>'))
+                       text=('<span style="color:#111111">━ 수정종가</span>  '
+                             '<span style="color:#111111">━ 곡선</span>  '
+                             '<span style="color:#1a56db">━ 상한</span>  '
+                             '<span style="color:#e5484d">━ 하한</span>'))
     # 아래 차트 이름
     fig.add_annotation(xref="paper", yref="paper", x=0.01, y=fig.layout.yaxis2.domain[1],
                        xanchor="left", yanchor="top", showarrow=False,
