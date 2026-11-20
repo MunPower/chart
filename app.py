@@ -315,8 +315,8 @@ st.markdown(
     f'<div style="font-size:13px;color:#888;margin-top:6px">거래량 {vol:,.0f}</div>'
     '</div>'
     '<div class="hd-lines">'
-    f'<div class="hd-lbl" data-ul="1">매도선<br>(<span data-k="u" style="color:#e5484d">{_up:,.0f}</span>)</div>'
-    f'<div class="hd-lbl" data-ul="1">매수선<br>(<span data-k="l" style="color:#3b4fe0">{_lo:,.0f}</span>)</div>'
+    f'<div class="hd-lbl" data-ul="1" style="color:#1a56db;font-weight:600">매도선<br>(<span data-k="u">{_up:,.0f}</span>)</div>'
+    f'<div class="hd-lbl" data-ul="1" style="color:#e5484d;font-weight:600">매수선<br>(<span data-k="l">{_lo:,.0f}</span>)</div>'
     '</div>'
     f'{_sig}'
     '</div>',
