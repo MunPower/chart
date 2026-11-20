@@ -293,8 +293,8 @@ st.markdown(
     f'<div style="font-size:13px;color:#888;margin-top:4px">거래량 {vol:,.0f}</div>'
     '</div>'
     f'{sig_html}'
-    f'<div style="{_lbl}">곡선추세상한<br>(<span style="color:#e5484d">{_up:,.0f}</span>)</div>'
-    f'<div style="{_lbl}">곡선추세하한<br>(<span style="color:#3b4fe0">{_lo:,.0f}</span>)</div>'
+    f'<div style="{_lbl}" data-ul="1">곡선추세상한<br>(<span data-k="u" style="color:#e5484d">{_up:,.0f}</span>)</div>'
+    f'<div style="{_lbl}" data-ul="1">곡선추세하한<br>(<span data-k="l" style="color:#3b4fe0">{_lo:,.0f}</span>)</div>'
     '</div>',
     unsafe_allow_html=True)
 
@@ -356,12 +356,18 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
   var sm=mk('left:4px;top:6px;font:600 12px sans-serif;white-space:nowrap;');   // 지수 대비 요약
   var dt=mk('left:4px;top:24px;font:11px sans-serif;color:#666;white-space:nowrap;');   // 계산 근거(기준일부터의 수익률)
   var ig=mk('left:4px;top:40px;font:600 11px sans-serif;color:#00a651;white-space:nowrap;');   // 지수 값(녹색)
+  var ud=mk('left:4px;top:56px;font:600 11px sans-serif;color:#000;white-space:nowrap;');   // 곡선추세 상한·하한 값
   if(IDX){sm.style.display='block'; dt.style.display='block'; ig.style.display='block';}
   var focus=N-1;           // 십자선이 가리키는 날짜(없으면 맨 오른쪽=최근)
   function sg(v){return (v>=0?'+':'')+v.toFixed(1)+'%';}
   function md(i){return cats[i].slice(5);}
   function pxs(v){return Number(v).toLocaleString('en-US',{maximumFractionDigits:0});}
   function updateSummary(){   // 선택한 날짜(없으면 최근 날짜)의 종목 가격과 지수로 강함/약함/보합 판단
+    var D0=focus;
+    ud.innerHTML='곡선추세상한 <span style="color:#e5484d">'+pxs(S[2][D0])+'</span> · 곡선추세하한 <span style="color:#3b4fe0">'+pxs(S[3][D0])+'</span>';
+    ud.style.display='block';
+    try{var hs=window.parent.document.querySelectorAll('[data-ul]');
+      for(var q=0;q<hs.length;q++){hs[q].querySelector('[data-k=u]').textContent=pxs(S[2][D0]); hs[q].querySelector('[data-k=l]').textContent=pxs(S[3][D0]);}}catch(e2){}
     if(!IDX)return;
     var R=IDXRAW||IDX, D=focus, d, band, row2, unit;
     if(COMPARE_MODE==='daily' && D>=1){
@@ -401,7 +407,7 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
   var tg=null;
   var dbg=mk('left:4px;top:66px;font:11px sans-serif;color:#c00;background:rgba(255,255,255,.92);padding:2px 4px;max-width:92%;z-index:70;');
   function showErr(e){dbg.style.display='block'; dbg.textContent='차트 오류: '+(e&&e.message?e.message:e);}
-  function hide(){[vl,hl,dl,pr].forEach(function(e){e.style.display='none';}); if(IDX&&focus!==N-1){focus=N-1; updateSummary();}}
+  function hide(){[vl,hl,dl,pr].forEach(function(e){e.style.display='none';}); if(focus!==N-1){focus=N-1; updateSummary();}}
 
   function fmt(c){return c.slice(5).replace('-','.');}
 
@@ -446,7 +452,7 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
     var lo=xa.range[0], hi=xa.range[1];
     var idx=Math.round((x-xa._offset)/xa._length*(hi-lo)+lo);
     idx=Math.max(0,Math.min(N-1,idx));
-    if(IDX){focus=idx; updateSummary();}
+    focus=idx; updateSummary();
     var xs=xa._offset+(idx-lo)/(hi-lo)*xa._length;
     if(!isFinite(xs))return;
     var ax=(y>=yb._offset)?yb:ya;
@@ -606,7 +612,7 @@ def finish(fig, low_label):
     fig.add_annotation(xref="paper", yref="paper", x=0.01, y=fig.layout.yaxis2.domain[1],
                        xanchor="left", yanchor="top", showarrow=False,
                        text=low_label, font=dict(size=11, color="#555"))
-    fig.update_layout(height=620, margin=dict(l=4, r=58, t=(78 if idx_arr is not None else 26), b=22),
+    fig.update_layout(height=620, margin=dict(l=4, r=58, t=(98 if idx_arr is not None else 44), b=22),
                       showlegend=False, bargap=0.05, hovermode=False, dragmode=False,
                       plot_bgcolor="white", paper_bgcolor="white")
     return fig
