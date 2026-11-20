@@ -352,6 +352,19 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
   var cats=gd.data[0].x, N=cats.length, MINS=Math.min(20,N), MAXS=Math.min(Math.max(120,initSpan),N);
   function clampSpan(v){return Math.round(Math.max(MINS,Math.min(MAXS,v)));}
   function clampI0(v,sp){return Math.round(Math.max(0,Math.min(N-sp,v)));}
+  // 핸드폰(화면 폭 600px 이하)은 처음에 약 2달(42거래일)만 확대해서 보여줌. PC는 그대로.
+  var PHONE_SPAN=42;
+  var isPhone=Math.min(window.screen&&window.screen.width||9999, window.innerWidth||9999)<=600;
+  if(isPhone && initSpan>PHONE_SPAN){
+    initSpan=PHONE_SPAN;
+    if(IDX){   // 지수선을 새 맨 왼쪽 종가에 맞춰 다시 환산(처음 한 번만)
+      var a0=N-initSpan, f0=S[0][a0]/IDX[a0];
+      if(isFinite(f0)&&f0>0){
+        for(var z=0;z<N;z++)IDX[z]=IDX[z]*f0;
+        try{Plotly.restyle(gd,{y:[IDX]},[IT]);}catch(e0){}
+      }
+    }
+  }
   var span=clampSpan(initSpan), i0=N-span;
   var pending=false, mode=null, timer=null, sx=0, sy=0, startI0=0, lastT=null, mdown=false, pinch=null, markersOn=null;
   var tStart=0, lastTap=0, lastTouch=0;
