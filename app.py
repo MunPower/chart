@@ -242,26 +242,29 @@ col = "#e5484d" if chg > 0 else ("#3b6fd4" if chg < 0 else "#333333")
 arrow = "▲" if chg > 0 else ("▼" if chg < 0 else "-")
 vol = df["Volume"].iloc[-1]
 
+# ───────────── 종목명 옆: 기준 날짜 + 지수 ─────────────
+if idx_arr is not None:
+    name_ph.markdown(
+        f'<div style="display:flex;align-items:baseline;gap:18px;flex-wrap:wrap">'
+        f'<div style="font-size:20px;font-weight:700;line-height:1.3">{html.escape(str(name))} '
+        f'<span style="font-size:13px;color:#888;font-weight:400">{html.escape(code)}</span></div>'
+        f'<div style="font-size:17px;font-weight:700;color:#0aa05a">'
+        f'● {df.index[-1]:%Y-%m-%d} {idx_name} {idx_arr[-1]:,.2f}</div>'
+        '</div>',
+        unsafe_allow_html=True)
+
 # ───────────── 매수·매도 표시 (현재가가 곡선추세 상·하한에 닿거나 넘었을 때) ─────────────
-TOUCH_TOL = 0.000      # 상·하한에서 0.3% 안쪽까지 가까워지면 '닿았다'고 봄
+TOUCH_TOL = 0          # 0 = 상·하한에 정확히 닿거나 넘었을 때만 표시
 _up, _lo = float(upper[-1]), float(lower[-1])
-_day = f"{df.index[-1]:%m-%d}"
 sig_html = ""
 if last >= _up * (1 - TOUCH_TOL):          # 상한에 닿거나 위로 넘음 → 파란색 매도
-    sig_html = (
-        '<div style="flex:1;min-width:130px;text-align:center">'
-        '<div style="font-size:32px;font-weight:800;color:#1a56db;line-height:1.1">매도</div>'
-        f'<div style="font-size:11px;color:#888;margin-top:3px">{_day} 종가가 곡선추세 상한({_up:,.0f})에 닿았거나 넘음 · 참고용</div>'
-        '</div>')
+    sig_html = '<div style="font-size:40px;font-weight:800;color:#1a56db;line-height:1">매도</div>'
 elif last <= _lo * (1 + TOUCH_TOL):        # 하한에 닿거나 아래로 내려감 → 빨간색 매수
-    sig_html = (
-        '<div style="flex:1;min-width:130px;text-align:center">'
-        '<div style="font-size:32px;font-weight:800;color:#e5484d;line-height:1.1">매수</div>'
-        f'<div style="font-size:11px;color:#888;margin-top:3px">{_day} 종가가 곡선추세 하한({_lo:,.0f})에 닿았거나 내려감 · 참고용</div>'
-        '</div>')
+    sig_html = '<div style="font-size:40px;font-weight:800;color:#e5484d;line-height:1">매수</div>'
 
+_lbl = "font-size:20px;color:#111;line-height:1.5;text-align:center"
 st.markdown(
-    '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">'
+    '<div style="display:flex;align-items:center;gap:22px;flex-wrap:wrap">'
     '<div>'
     '<div style="display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap">'
     f'<span style="font-size:42px;font-weight:700;color:{col};line-height:1">{last:,.0f}</span>'
@@ -270,6 +273,8 @@ st.markdown(
     f'<div style="font-size:13px;color:#888;margin-top:4px">거래량 {vol:,.0f}</div>'
     '</div>'
     f'{sig_html}'
+    f'<div style="{_lbl}">곡선추세상한<br>(<span style="color:#e5484d">{_up:,.0f}</span>)</div>'
+    f'<div style="{_lbl}">곡선추세하한<br>(<span style="color:#3b4fe0">{_lo:,.0f}</span>)</div>'
     '</div>',
     unsafe_allow_html=True)
 
