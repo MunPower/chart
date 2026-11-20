@@ -309,8 +309,8 @@ st.markdown(
     f'<div style="font-size:12px;color:#888;margin-top:4px">거래량 {vol:,.0f}</div>'
     '</div>'
     f'{_sig}'
-    f'<div class="hd-lbl" data-ul="1">곡선추세상한<br>(<span data-k="u" style="color:#e5484d">{_up:,.0f}</span>)</div>'
-    f'<div class="hd-lbl" data-ul="1">곡선추세하한<br>(<span data-k="l" style="color:#3b4fe0">{_lo:,.0f}</span>)</div>'
+    f'<div class="hd-lbl" data-ul="1">매도선<br>(<span data-k="u" style="color:#e5484d">{_up:,.0f}</span>)</div>'
+    f'<div class="hd-lbl" data-ul="1">매수선<br>(<span data-k="l" style="color:#3b4fe0">{_lo:,.0f}</span>)</div>'
     '</div>',
     unsafe_allow_html=True)
 
@@ -324,8 +324,8 @@ def direction_colors(v):
 def base_traces(fig):
     fig.add_trace(go.Scatter(x=dates, y=yv, name="수정종가", line=dict(color="#e5484d", width=1.8)), row=1, col=1)
     fig.add_trace(go.Scatter(x=dates, y=curvev, name="곡선추세", line=dict(color="royalblue", width=1.5)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=dates, y=upv, name="곡선추세상한", line=dict(color="navy", width=1)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=dates, y=lov, name="곡선추세하한", line=dict(color="navy", width=1)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=dates, y=upv, name="매도선", line=dict(color="navy", width=1)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=dates, y=lov, name="매수선", line=dict(color="navy", width=1)), row=1, col=1)
     if idx_scaled is not None:   # 4번 트레이스: 지수(녹색 점선)
         fig.add_trace(go.Scatter(x=dates, y=idx_scaled, name=idx_name,
                                  line=dict(color="#00a651", width=3, dash="dot")), row=1, col=1)
@@ -386,7 +386,6 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
   var sm=mk('left:4px;top:6px;font:600 12px sans-serif;white-space:nowrap;');   // 지수 대비 요약
   var dt=mk('left:4px;top:24px;font:11px sans-serif;color:#666;white-space:nowrap;');   // 계산 근거(기준일부터의 수익률)
   var ig=mk('left:4px;top:40px;font:600 11px sans-serif;color:#00a651;white-space:nowrap;');   // 지수 값(녹색)
-  var ud=mk('left:4px;top:56px;font:600 11px sans-serif;color:#000;white-space:nowrap;');   // 곡선추세 상한·하한 값
   if(IDX){sm.style.display='block'; dt.style.display='block'; ig.style.display='block';}
   var focus=N-1;           // 십자선이 가리키는 날짜(없으면 맨 오른쪽=최근)
   function sg(v){return (v>=0?'+':'')+v.toFixed(1)+'%';}
@@ -394,8 +393,6 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
   function pxs(v){return Number(v).toLocaleString('en-US',{maximumFractionDigits:0});}
   function updateSummary(){   // 선택한 날짜(없으면 최근 날짜)의 종목 가격과 지수로 강함/약함/보합 판단
     var D0=focus;
-    ud.innerHTML='곡선추세상한 <span style="color:#e5484d">'+pxs(S[2][D0])+'</span> · 곡선추세하한 <span style="color:#3b4fe0">'+pxs(S[3][D0])+'</span>';
-    ud.style.display='block';
     try{
       var su=window.parent.document.querySelectorAll('[data-k=u]'), sl2=window.parent.document.querySelectorAll('[data-k=l]');
       for(var q=0;q<su.length;q++)su[q].textContent=pxs(S[2][D0]);
@@ -644,7 +641,7 @@ def finish(fig, low_label):
     fig.add_annotation(xref="paper", yref="paper", x=0.01, y=fig.layout.yaxis2.domain[1],
                        xanchor="left", yanchor="top", showarrow=False,
                        text=low_label, font=dict(size=11, color="#555"))
-    fig.update_layout(height=620, margin=dict(l=4, r=58, t=(98 if idx_arr is not None else 44), b=22),
+    fig.update_layout(height=620, margin=dict(l=4, r=58, t=(78 if idx_arr is not None else 26), b=22),
                       showlegend=False, bargap=0.05, hovermode=False, dragmode=False,
                       plot_bgcolor="white", paper_bgcolor="white")
     return fig
@@ -679,8 +676,6 @@ fig.add_trace(go.Bar(x=dates, y=cv, marker_color=direction_colors(curvev),
                      name="곡선추세 방향", showlegend=False), row=2, col=1)
 show(finish(fig, "곡선추세 방향"), "chart_trend", cv)
 status.empty()
-st.caption("조작: 좌우로 밀기=기간 이동 · 길게 누름(0.5초, 진동)=십자선 · 두 손가락 벌리기/모으기 또는 ＋/－=확대·축소 · 두 번 톡(더블클릭)=기본값 · 지수 버튼=비교선(점선) 켜기/끄기. "
-           "하단 봉: 곡선추세가 상승 중이면 빨강, 하락 중이면 파랑.")
 if idx_arr is None:
     st.caption("※ 지수 데이터를 불러오지 못해 비교선 없이 표시 중입니다.")
 elif idx_note:
