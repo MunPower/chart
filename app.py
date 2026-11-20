@@ -154,6 +154,21 @@ status.markdown(
     '⏳ 시세를 불러오는 중입니다. 처음 한 번은 20~30초 걸릴 수 있어요. 잠시만 기다려 주세요.</div>',
     unsafe_allow_html=True)
 
+@st.cache_data(ttl=30, show_spinner=False)
+def live_index(sym: str):
+    """네이버에서 지수 현재값(장중이면 실시간, 장 마감 후엔 종가)을 받는다. 실패하면 None"""
+    import requests
+    try:
+        r = requests.get(f"https://m.stock.naver.com/api/index/{'KOSDAQ' if sym == 'KQ11' else 'KOSPI'}/basic",
+                         headers={"User-Agent": "Mozilla/5.0"}, timeout=4)
+        j = r.json()
+        val = float(str(j["closePrice"]).replace(",", ""))
+        day = pd.Timestamp(str(j.get("localTradedAt", ""))[:10]).normalize()
+        return day, val
+    except Exception:
+        return None
+
+
 @st.cache_data(ttl=600, show_spinner=False)
 def load_both(code: str, idx_sym: str, days: int):
     """종목과 지수 시세를 동시에 받아 온다. 지수는 8초 안에 못 받으면 None(차트는 지수선 없이 표시)"""
@@ -219,8 +234,13 @@ yv, curvev, upv, lov = y[sl], curve[sl], upper[sl], lower[sl]
 
 # ───────────── 지수(코스피/코스닥) 비교선 ─────────────
 idx_arr = None
+_live_ok = False
 try:
     _s = _idf["Close"].reindex(df.index).ffill().bfill()
+    _live = live_index(idx_sym)                 # 종목처럼 접속할 때마다 최신 지수값으로 갱신
+    if _live is not None and _live[0] >= df.index[-1].normalize():
+        _s.iloc[-1] = _live[1]
+        _live_ok = True
     if len(_s) == n and np.isfinite(_s.to_numpy(dtype=float)).all():
         idx_arr = _s.to_numpy(dtype=float)
 except Exception:
@@ -228,7 +248,7 @@ except Exception:
 idx_note = ""
 if idx_arr is not None:     # 지수 데이터가 종목보다 며칠 일찍 끝나면 알려줌 (마지막 값으로 채워졌다는 뜻)
     _gap = (df.index.max() - _idf.index.max()).days
-    if _gap >= 1:
+    if _gap >= 1 and not _live_ok:
         idx_note = f"※ {idx_name} 데이터가 {_idf.index.max():%Y-%m-%d}까지만 있어 최근 {_gap}일은 마지막 값으로 채웠습니다."
 idx_scaled = None
 if idx_arr is not None:     # 처음 열었을 때 맨 왼쪽 종가에 한 번만 맞춘 뒤 고정 (밀거나 확대해도 변하지 않음)
