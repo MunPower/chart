@@ -40,6 +40,37 @@ WORDS = {
 }
 PHRASES = {r"s-oil": "에쓰오일"}
 
+# ───────────── 미국 주식: 한글 이름으로도 찾을 수 있게 (티커: (한글이름, 거래소)) ─────────────
+# 거래소가 NASDAQ이면 나스닥 지수, 그 밖(NYSE 등)이면 S&P500 지수와 비교
+US_KO = {
+    "AAPL": ("애플", "NASDAQ"), "MSFT": ("마이크로소프트", "NASDAQ"), "NVDA": ("엔비디아", "NASDAQ"),
+    "AMZN": ("아마존", "NASDAQ"), "GOOGL": ("알파벳A 구글", "NASDAQ"), "GOOG": ("알파벳C 구글", "NASDAQ"),
+    "META": ("메타 페이스북", "NASDAQ"), "TSLA": ("테슬라", "NASDAQ"), "AVGO": ("브로드컴", "NASDAQ"),
+    "AMD": ("에이엠디", "NASDAQ"), "NFLX": ("넷플릭스", "NASDAQ"), "INTC": ("인텔", "NASDAQ"),
+    "QCOM": ("퀄컴", "NASDAQ"), "MU": ("마이크론", "NASDAQ"), "ASML": ("에이에스엠엘", "NASDAQ"),
+    "ADBE": ("어도비", "NASDAQ"), "CSCO": ("시스코", "NASDAQ"), "PEP": ("펩시코", "NASDAQ"),
+    "COST": ("코스트코", "NASDAQ"), "SBUX": ("스타벅스", "NASDAQ"), "PLTR": ("팔란티어", "NASDAQ"),
+    "PYPL": ("페이팔", "NASDAQ"), "ARM": ("암홀딩스", "NASDAQ"), "SMCI": ("슈퍼마이크로컴퓨터", "NASDAQ"),
+    "MSTR": ("마이크로스트래티지", "NASDAQ"), "COIN": ("코인베이스", "NASDAQ"), "ABNB": ("에어비앤비", "NASDAQ"),
+    "RIVN": ("리비안", "NASDAQ"), "LCID": ("루시드", "NASDAQ"), "QQQ": ("나스닥100 ETF", "NASDAQ"),
+    "TQQQ": ("나스닥100 3배 ETF", "NASDAQ"), "SOXL": ("반도체 3배 ETF", "NASDAQ"),
+    "IONQ": ("아이온큐", "NYSE"), "TSM": ("TSMC 대만반도체", "NYSE"), "BRK-B": ("버크셔해서웨이", "NYSE"),
+    "JPM": ("제이피모건", "NYSE"), "V": ("비자", "NYSE"), "MA": ("마스터카드", "NYSE"),
+    "KO": ("코카콜라", "NYSE"), "DIS": ("디즈니", "NYSE"), "NKE": ("나이키", "NYSE"),
+    "MCD": ("맥도날드", "NYSE"), "WMT": ("월마트", "NYSE"), "JNJ": ("존슨앤드존슨", "NYSE"),
+    "PFE": ("화이자", "NYSE"), "LLY": ("일라이릴리", "NYSE"), "NVO": ("노보노디스크", "NYSE"),
+    "XOM": ("엑슨모빌", "NYSE"), "BA": ("보잉", "NYSE"), "ORCL": ("오라클", "NYSE"),
+    "CRM": ("세일즈포스", "NYSE"), "IBM": ("아이비엠", "NYSE"), "UBER": ("우버", "NYSE"),
+    "BABA": ("알리바바", "NYSE"), "SPY": ("S&P500 ETF", "NYSE"), "VOO": ("뱅가드 S&P500 ETF", "NYSE"),
+    "SCHD": ("슈왑 배당 ETF", "NYSE"),
+}
+US_MKTS = ("NASDAQ", "NYSE", "AMEX", "US")
+
+
+def is_us(code: str) -> bool:
+    """한국 종목코드는 숫자로 시작(005930, 0091C0), 미국 티커는 영문으로 시작(AAPL)"""
+    return bool(code) and code[0].isalpha()
+
 
 def norm(t) -> str:
     return re.sub(r"[\s\-_.·&/()]", "", str(t)).lower()
@@ -63,25 +94,53 @@ def to_ko(name: str) -> str:
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def listing() -> pd.DataFrame:
-    """종목명 검색용 목록 (주식 + ETF)"""
-    def one(market):
+    """종목명 검색용 목록 (국내 주식 + 국내 ETF + 미국 나스닥·뉴욕·아멕스 + 미국 ETF)"""
+    # (목록 이름, 거래소 표시) — 국내는 목록 안의 Market 값으로 코스피/코스닥을 나눔
+    SOURCES = (("KRX", ""), ("ETF/KR", "ETF"), ("NASDAQ", "NASDAQ"), ("NYSE", "NYSE"),
+               ("AMEX", "AMEX"), ("ETF/US", "US"))
+
+    def one(src):
+        market, label = src
         try:
             d = fdr.StockListing(market)
             cc = "Code" if "Code" in d.columns else "Symbol"
             d = d.rename(columns={cc: "Code"})
-            d["Market"] = d["Market"] if "Market" in d.columns else ("ETF" if market == "ETF/KR" else "")
+            if label in US_MKTS or "Market" not in d.columns:
+                d["Market"] = label
             return d[["Code", "Name", "Market"]]
         except Exception:
             return None
-    with ThreadPoolExecutor(max_workers=2) as ex:                  # 두 목록을 동시에 받아 대기 시간 단축
-        frames = [f for f in ex.map(one, ("KRX", "ETF/KR")) if f is not None]
-    if not frames:
-        return pd.DataFrame(columns=["Code", "Name", "nn", "nk", "mkt"])
-    out = pd.concat(frames).dropna().drop_duplicates("Code").reset_index(drop=True)
-    out["Code"] = out["Code"].astype(str)
-    out["mkt"] = out["Market"].astype(str).str.upper().map(lambda x: "KOSDAQ" if "KOSDAQ" in x else "KOSPI")
+    ex = ThreadPoolExecutor(max_workers=len(SOURCES))             # 목록을 동시에 받아 대기 시간 단축
+    futs = [ex.submit(one, s) for s in SOURCES]
+    frames = []
+    for f in futs:
+        try:
+            r = f.result(timeout=25)                               # 한 목록이 늦어도 나머지는 사용
+            if r is not None:
+                frames.append(r)
+        except Exception:
+            pass
+    ex.shutdown(wait=False)
+    # 자주 찾는 미국 종목은 목록을 못 받아도 항상 검색되게 추가
+    frames.append(pd.DataFrame([(k, k, v[1]) for k, v in US_KO.items()], columns=["Code", "Name", "Market"]))
+    out = pd.concat(frames).dropna().reset_index(drop=True)
+    out["Code"] = out["Code"].astype(str).str.strip().str.replace(".", "-", regex=False)   # BRK.B → BRK-B
+    out = out.drop_duplicates("Code").reset_index(drop=True)      # 먼저 받은 목록(실제 회사명)을 우선 사용
+
+    def mk(x):
+        x = str(x).upper()
+        if x in US_MKTS:
+            return x
+        return "KOSDAQ" if "KOSDAQ" in x else "KOSPI"
+    out["mkt"] = out["Market"].map(mk)
+    for k, (ko, m) in US_KO.items():                               # 거래소를 확실히 아는 종목은 고정
+        out.loc[out["Code"] == k, "mkt"] = m
+    out["ko"] = out["Code"].map(lambda c: US_KO.get(c, ("",))[0])   # 미국 종목 한글 이름
+    us = out["mkt"].isin(US_MKTS)
     out["nn"] = out["Name"].map(norm)                       # 원래 이름(정규화)
     out["nk"] = out["Name"].map(lambda x: norm(to_ko(x)))   # 한글 발음 이름(정규화)
+    out.loc[us, "nk"] = [norm(k) if k else n for k, n in zip(out.loc[us, "ko"], out.loc[us, "nn"])]
+    out["disp"] = [f"{k} {nm}" if k and k != nm else nm for k, nm in zip(out["ko"], out["Name"])]
     return out
 
 
@@ -90,7 +149,8 @@ def search(lst: pd.DataFrame, q: str):
     nq, nqk = norm(q), norm(to_ko(q))
     if not nq or lst.empty:
         return "none", lst.iloc[0:0]
-    exact = lst[(lst["nn"] == nq) | (lst["nk"] == nq) | (lst["nk"] == nqk)]
+    qc = q.strip().upper().replace(".", "-")
+    exact = lst[(lst["nn"] == nq) | (lst["nk"] == nq) | (lst["nk"] == nqk) | (lst["Code"] == qc)]
     if len(exact) == 1:
         return "exact", exact
     m = exact
@@ -111,29 +171,39 @@ if "code" not in st.session_state:
     st.session_state.code = DEFAULT_CODE
 
 name_ph = st.empty()
-q = st.text_input("종목 검색", placeholder="🔍 종목코드 또는 종목명 (예: 278530, 삼성전자, 네이버)",
+q = st.text_input("종목 검색", placeholder="🔍 종목코드·종목명 (예: 삼성전자, 278530, 애플, AAPL, 테슬라)",
                   label_visibility="collapsed").strip()
 # 종목 목록은 검색할 때(또는 다른 종목을 보고 있을 때)만 불러온다 → 처음 화면이 바로 뜸
 if q or st.session_state.code != DEFAULT_CODE:
-    with st.spinner("종목 목록을 불러오는 중입니다…"):
+    with st.spinner("종목 목록(국내·미국)을 불러오는 중입니다… 처음 한 번은 조금 걸릴 수 있어요"):
         lst = listing()
 else:
-    lst = pd.DataFrame(columns=["Code", "Name", "nn", "nk", "mkt"])
-names = dict(zip(lst["Code"], lst["Name"]))
-mkts = dict(zip(lst["Code"], lst["mkt"]))        # 코스피/코스닥 구분 (ETF는 코스피로 처리)
+    lst = pd.DataFrame(columns=["Code", "Name", "nn", "nk", "mkt", "disp"])
+names = dict(zip(lst["Code"], lst["disp"]))
+mkts = dict(zip(lst["Code"], lst["mkt"]))        # 코스피/코스닥/나스닥/뉴욕 구분 (국내 ETF는 코스피로 처리)
 names.setdefault(DEFAULT_CODE, "KODEX 200TR")   # 종목 목록 없이도 기본 종목 이름 표시
+for _k, (_ko, _m) in US_KO.items():             # 목록을 못 받아도 인기 미국 종목은 한글 이름 표시
+    names.setdefault(_k, _ko)
+    mkts.setdefault(_k, _m)
+MKT_KO = {"NASDAQ": "나스닥", "NYSE": "뉴욕", "AMEX": "아멕스", "US": "미국"}
 if q:
-    qu = q.upper()
-    if qu in names or (len(q) == 6 and q.isdigit()):
-        st.session_state.code = qu                                  # 종목코드 → 바로 표시
+    qu = q.upper().replace(".", "-")
+    if len(q) == 6 and q.isdigit():
+        st.session_state.code = qu                                  # 국내 6자리 종목코드 → 바로 표시
     elif lst.empty:
-        st.caption("종목 목록을 불러오지 못했습니다. 6자리 종목코드로 검색해 주세요.")
+        if re.fullmatch(r"[A-Z]{1,5}(-[A-Z])?", qu):               # 목록이 없어도 미국 티커는 바로 시도
+            st.session_state.code = qu
+        else:
+            st.caption("종목 목록을 불러오지 못했습니다. 6자리 종목코드나 미국 티커(예: AAPL)로 검색해 주세요.")
     else:
         kind, m = search(lst, q)
-        if kind == "exact":                                         # 이름이 정확히 맞으면 바로 표시
+        if kind == "none" and re.fullmatch(r"[A-Z]{1,5}(-[A-Z])?", qu):
+            st.session_state.code = qu                              # 목록에 없는 미국 티커도 바로 시도
+        elif kind == "exact":                                       # 이름·코드가 정확히 맞으면 바로 표시
             st.session_state.code = m.iloc[0]["Code"]
         elif kind == "list":                                        # 일부만 입력 → 연관 종목에서 선택
-            opts = [f"{r.Name} ({r.Code})" for r in m.head(30).itertuples()]
+            opts = [f"{r.disp}{' · ' + MKT_KO[r.mkt] if r.mkt in MKT_KO else ''} ({r.Code})"
+                    for r in m.head(30).itertuples()]
             sel = st.selectbox("연관 종목", opts, index=None, key=f"sel_{norm(q)}",
                                placeholder=f"연관 종목 {len(m)}개 — 여기서 선택", label_visibility="collapsed")
             if sel:
@@ -142,9 +212,19 @@ if q:
             st.caption("검색 결과가 없습니다.")
 code = st.session_state.code
 name = names.get(code, code)
+US = is_us(code)                                  # 미국 종목 여부
+DEC = 2 if US else 0                              # 가격 소수 자릿수 (미국 $187.45 / 국내 71,500)
+CUR = "$" if US else ""
+
+
+def px(v) -> str:
+    return f"{CUR}{v:,.{DEC}f}"
+
+
+code_tag = html.escape(code) + (f" · {MKT_KO.get(mkts.get(code, 'US'), '미국')}" if US else "")
 name_ph.markdown(
     f'<div style="font-size:20px;font-weight:700;line-height:1.3">{html.escape(str(name))} '
-    f'<span style="font-size:13px;color:#888;font-weight:400">{html.escape(code)}</span></div>',
+    f'<span style="font-size:13px;color:#888;font-weight:400">{code_tag}</span></div>',
     unsafe_allow_html=True)
 
 # 시세를 받는 동안 "고장난 것처럼" 보이지 않도록 안내 표시 (차트가 나오면 사라짐)
@@ -156,7 +236,9 @@ status.markdown(
 
 @st.cache_data(ttl=30, show_spinner=False)
 def live_index(sym: str):
-    """네이버에서 지수 현재값(장중이면 실시간, 장 마감 후엔 종가)을 받는다. 실패하면 None"""
+    """네이버에서 지수 현재값(장중이면 실시간, 장 마감 후엔 종가)을 받는다. 실패하면 None (국내 지수만)"""
+    if sym not in ("KS11", "KQ11"):
+        return None
     import requests
     try:
         r = requests.get(f"https://m.stock.naver.com/api/index/{'KOSDAQ' if sym == 'KQ11' else 'KOSPI'}/basic",
@@ -174,7 +256,7 @@ def load_both(code: str, idx_sym: str, days: int):
     """종목과 지수 시세를 동시에 받아 온다. 지수는 8초 안에 못 받으면 None(차트는 지수선 없이 표시)"""
     start = (pd.Timestamp.today() - pd.Timedelta(days=int(days * 1.6) + 10)).strftime("%Y-%m-%d")
     ex = ThreadPoolExecutor(max_workers=2)
-    f_stock = ex.submit(fdr.DataReader, code, start)
+    f_stock = ex.submit(fdr.DataReader, code.replace(".", "-"), start)
     f_idx = ex.submit(fdr.DataReader, idx_sym, start)
     try:
         stock = f_stock.result(timeout=40).tail(int(days))
@@ -197,8 +279,11 @@ def hp_trend(z: np.ndarray, lam: float) -> np.ndarray:
 
 
 calc = max(int(calc), 180)
-mkt = mkts.get(code, "KOSPI")
-idx_sym, idx_name = ("KQ11", "코스닥") if mkt == "KOSDAQ" else ("KS11", "코스피")
+mkt = mkts.get(code, "NASDAQ" if US else "KOSPI")
+if US:      # 미국: 나스닥 상장 → 나스닥 종합지수, 그 밖(뉴욕 등) → S&P500
+    idx_sym, idx_name = ("IXIC", "나스닥") if mkt == "NASDAQ" else ("US500", "S&P500")
+else:
+    idx_sym, idx_name = ("KQ11", "코스닥") if mkt == "KOSDAQ" else ("KS11", "코스피")
 try:
     df, _idf = load_both(code.strip(), idx_sym, calc)
 except Exception as e:
@@ -310,13 +395,13 @@ st.markdown(
     '</style>'
     '<div class="hd-row">'
     '<div>'
-    f'<div class="hd-px"><span class="hd-big" style="color:{col}">{last:,.0f}</span>'
-    f'<span class="hd-chg" style="color:{col}">{arrow} {abs(chg):,.0f} &nbsp; {pct:+.2f}%</span></div>'
+    f'<div class="hd-px"><span class="hd-big" style="color:{col}">{px(last)}</span>'
+    f'<span class="hd-chg" style="color:{col}">{arrow} {abs(chg):,.{DEC}f} &nbsp; {pct:+.2f}%</span></div>'
     f'<div style="font-size:13px;color:#888;margin-top:6px">거래량 {vol:,.0f}</div>'
     '</div>'
     '<div class="hd-lines">'
-    f'<div class="hd-lbl" data-ul="1" style="color:#1a56db;font-weight:600">매도선<br>(<span data-k="u">{_up:,.0f}</span>)</div>'
-    f'<div class="hd-lbl" data-ul="1" style="color:#e5484d;font-weight:600">매수선<br>(<span data-k="l">{_lo:,.0f}</span>)</div>'
+    f'<div class="hd-lbl" data-ul="1" style="color:#1a56db;font-weight:600">매도선<br>(<span data-k="u">{_up:,.{DEC}f}</span>)</div>'
+    f'<div class="hd-lbl" data-ul="1" style="color:#e5484d;font-weight:600">매수선<br>(<span data-k="l">{_lo:,.{DEC}f}</span>)</div>'
     '</div>'
     f'{_sig}'
     '</div>',
@@ -345,7 +430,8 @@ def base_traces(fig):
 
 
 CROSSHAIR_JS = """
-function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LOW, ANCH, IDX2, IT2, HIGH){
+function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LOW, ANCH, IDX2, IT2, HIGH, DEC){
+  DEC=DEC||0;              // 가격 소수 자릿수 (국내 0, 미국 2)
   var LP_MS=500;           // 길게 눌러 진동이 오기까지의 시간(ms)
   var CROSS_DELAY_MS=150;  // 진동 후 십자선이 나타나기까지의 시간(ms) (진동 → 십자선 순서 맞춤)
   var PAN_GAIN=1.5;        // 손가락 이동 속도 배율
@@ -400,7 +486,7 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
   var focus=N-1;           // 십자선이 가리키는 날짜(없으면 맨 오른쪽=최근)
   function sg(v){return (v>=0?'+':'')+v.toFixed(1)+'%';}
   function md(i){return cats[i].slice(5);}
-  function pxs(v){return Number(v).toLocaleString('en-US',{maximumFractionDigits:0});}
+  function pxs(v){return Number(v).toLocaleString('en-US',{minimumFractionDigits:DEC,maximumFractionDigits:DEC});}
   function updateSummary(){   // 선택한 날짜(없으면 최근 날짜)의 종목 가격과 지수로 강함/약함/보합 판단
     var D0=focus;
     try{
@@ -495,7 +581,7 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
     if(!isFinite(xs))return;
     var ax=(y>=yb._offset)?yb:ya;
     var v=ax.range[1]-(y-ax._offset)/ax._length*(ax.range[1]-ax.range[0]);
-    var txt=Math.round(v).toLocaleString('en-US');
+    var txt=pxs(v);
     vl.style.cssText+=';display:block;left:'+xs+'px;top:'+s.t+'px;height:'+s.h+'px;';
     hl.style.cssText+=';display:block;left:'+s.l+'px;top:'+y+'px;width:'+s.w+'px;';
     var showI=!!(IDX&&IDXRAW&&idxOn);
@@ -632,13 +718,13 @@ def finish(fig, low_label):
                      showline=False, zeroline=False)
     fig.update_xaxes(showticklabels=True, row=1, col=1)    # 날짜는 위 차트 아래(두 차트 사이)에 표시
     fig.update_xaxes(showticklabels=False, row=2, col=1)
-    fig.update_yaxes(side="right", tickformat=",.0f", tickfont=dict(size=11, color="#555"),
+    fig.update_yaxes(side="right", tickformat=(",.2f" if US and last < 100 else ",.0f"), tickfont=dict(size=11, color="#555"),
                      showgrid=True, gridcolor="#eeeeee", zeroline=False, showline=False, ticks="")
     fig.update_yaxes(nticks=4, row=2, col=1)
     tagc = "#e5484d" if chg > 0 else "#3b6fd4"
     # 현재가 태그(오른쪽 축)
     fig.add_annotation(xref="paper", x=1.0, xanchor="left", yref="y", y=yv[-1], showarrow=False,
-                       text=f"{last:,.0f}<br>{pct:+.2f}%", align="left", borderpad=2,
+                       text=f"{last:,.{DEC}f}<br>{pct:+.2f}%", align="left", borderpad=2,
                        font=dict(color="white", size=11), bgcolor=tagc)
     # 범례(차트 위 한 줄)
     fig.add_annotation(xref="paper", yref="paper", x=0.0, y=1.0, xanchor="left", yanchor="bottom",
@@ -669,10 +755,10 @@ def show(fig, div_id, bars):
     open_json = dump(pack(ov))
     low_json = dump(pack(lv))
     idx2_json = dump(pack(idx_scaled_p)) if idx_scaled_p is not None else "null"
-    post = "installCrosshair(document.getElementById('{plot_id}'), %d, %s, %s, %s, %d, %s, %s, %s, %s, %d, %s, %d, %s);" % (
+    post = "installCrosshair(document.getElementById('{plot_id}'), %d, %s, %s, %s, %d, %s, %s, %s, %s, %d, %s, %d, %s, %d);" % (
         init_span, dump(series), dump(pack(bars)),
         idx_json, (4 if idx_scaled is not None else -1), json.dumps(idx_name),
-        raw_json, open_json, low_json, n - init_span, idx2_json, 5, dump(pack(hv)))
+        raw_json, open_json, low_json, n - init_span, idx2_json, 5, dump(pack(hv)), DEC)
     html = "<script>" + CROSSHAIR_JS + "</script>" + fig.to_html(
         full_html=False, include_plotlyjs="cdn", div_id=div_id,
         config={"staticPlot": True, "responsive": True},
