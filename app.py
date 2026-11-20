@@ -282,19 +282,31 @@ if last >= _up * (1 - TOUCH_TOL):          # 상한에 닿거나 위로 넘음 �
 elif last <= _lo * (1 + TOUCH_TOL):        # 하한에 닿거나 아래로 내려감 → 빨간색 매수
     sig_html = '<div style="font-size:40px;font-weight:800;color:#e5484d;line-height:1">매수</div>'
 
-_lbl = "font-size:20px;color:#111;line-height:1.5;text-align:center"
+_sig = ""
+if sig_html:
+    _sig_txt, _sig_col = ("매도", "#1a56db") if "매도" in sig_html else ("매수", "#e5484d")
+    _sig = f'<div class="hd-sig" style="color:{_sig_col}">{_sig_txt}</div>'
 st.markdown(
-    '<div style="display:flex;align-items:center;gap:22px;flex-wrap:wrap">'
+    '<style>'
+    '.hd-row{display:flex;align-items:center;gap:16px;flex-wrap:nowrap}'
+    '.hd-px{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap}'
+    '.hd-big{font-size:42px;font-weight:700;line-height:1}'
+    '.hd-chg{font-size:16px;padding-bottom:4px}'
+    '.hd-sig{font-size:30px;font-weight:800;line-height:1;white-space:nowrap}'
+    '.hd-lbl{font-size:16px;color:#111;line-height:1.4;text-align:center;white-space:nowrap}'
+    '@media (max-width:600px){'
+    '.hd-row{gap:8px}.hd-big{font-size:30px}.hd-chg{font-size:12px;padding-bottom:2px}'
+    '.hd-sig{font-size:20px}.hd-lbl{font-size:11px}}'
+    '</style>'
+    '<div class="hd-row">'
     '<div>'
-    '<div style="display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap">'
-    f'<span style="font-size:42px;font-weight:700;color:{col};line-height:1">{last:,.0f}</span>'
-    f'<span style="font-size:17px;color:{col};padding-bottom:4px">{arrow} {abs(chg):,.0f} &nbsp; {pct:+.2f}%</span>'
+    f'<div class="hd-px"><span class="hd-big" style="color:{col}">{last:,.0f}</span>'
+    f'<span class="hd-chg" style="color:{col}">{arrow} {abs(chg):,.0f} &nbsp; {pct:+.2f}%</span></div>'
+    f'<div style="font-size:12px;color:#888;margin-top:4px">거래량 {vol:,.0f}</div>'
     '</div>'
-    f'<div style="font-size:13px;color:#888;margin-top:4px">거래량 {vol:,.0f}</div>'
-    '</div>'
-    f'{sig_html}'
-    f'<div style="{_lbl}" data-ul="1">곡선추세상한<br>(<span data-k="u" style="color:#e5484d">{_up:,.0f}</span>)</div>'
-    f'<div style="{_lbl}" data-ul="1">곡선추세하한<br>(<span data-k="l" style="color:#3b4fe0">{_lo:,.0f}</span>)</div>'
+    f'{_sig}'
+    f'<div class="hd-lbl" data-ul="1">곡선추세상한<br>(<span data-k="u" style="color:#e5484d">{_up:,.0f}</span>)</div>'
+    f'<div class="hd-lbl" data-ul="1">곡선추세하한<br>(<span data-k="l" style="color:#3b4fe0">{_lo:,.0f}</span>)</div>'
     '</div>',
     unsafe_allow_html=True)
 
