@@ -231,6 +231,11 @@ init_span = int(min(disp, D))
 sl = slice(n - D, n)
 dates = df.index.strftime("%Y-%m-%d")[sl]
 yv, curvev, upv, lov = y[sl], curve[sl], upper[sl], lower[sl]
+def _ohl(c):   # 시가·고가·저가가 비어 있으면 종가로 대신 채움
+    a = df[c].to_numpy(dtype=float)[sl] if c in df.columns else yv.copy()
+    return np.where(np.isfinite(a) & (a > 0), a, yv)
+ov, hv, lv = _ohl("Open"), _ohl("High"), _ohl("Low")
+hv, lv = np.maximum.reduce([hv, ov, yv]), np.minimum.reduce([lv, ov, yv])
 
 # ───────────── 지수(코스피/코스닥) 비교선 ─────────────
 idx_arr = None
@@ -325,7 +330,9 @@ def direction_colors(v):
 
 
 def base_traces(fig):
-    fig.add_trace(go.Scatter(x=dates, y=yv, name="수정종가", line=dict(color="#111111", width=1.8)), row=1, col=1)
+    fig.add_trace(go.Candlestick(x=dates, open=ov, high=hv, low=lv, close=yv, name="수정종가", showlegend=False,
+                                 increasing=dict(line=dict(color="#e5484d", width=1), fillcolor="#e5484d"),
+                                 decreasing=dict(line=dict(color="#3b6fd4", width=1), fillcolor="#3b6fd4")), row=1, col=1)
     fig.add_trace(go.Scatter(x=dates, y=curvev, name="곡선추세", line=dict(color="#111111", width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=dates, y=upv, name="매도선", line=dict(color="#1a56db", width=2.2)), row=1, col=1)
     fig.add_trace(go.Scatter(x=dates, y=lov, name="매수선", line=dict(color="#e5484d", width=2.2)), row=1, col=1)
@@ -338,7 +345,7 @@ def base_traces(fig):
 
 
 CROSSHAIR_JS = """
-function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LOW, ANCH, IDX2, IT2){
+function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LOW, ANCH, IDX2, IT2, HIGH){
   var LP_MS=500;           // 길게 눌러 진동이 오기까지의 시간(ms)
   var CROSS_DELAY_MS=150;  // 진동 후 십자선이 나타나기까지의 시간(ms) (진동 → 십자선 순서 맞춤)
   var PAN_GAIN=1.5;        // 손가락 이동 속도 배율
@@ -449,6 +456,7 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
     var lo=Infinity, hi=-Infinity, bl=0, bh=0;
     for(k=0;k<S.length;k++){for(i=a;i<=b;i++){v=S[k][i]; if(v<lo)lo=v; if(v>hi)hi=v;}}
     if(IDX&&idxOn){for(i=a;i<=b;i++){v=IDX[i]; if(v<lo)lo=v; if(v>hi)hi=v;}}
+    if(HIGH&&LOW){for(i=a;i<=b;i++){if(HIGH[i]>hi)hi=HIGH[i]; if(LOW[i]<lo)lo=LOW[i];}}   // 캔들 고가·저가
     for(i=a;i<=b;i++){v=B[i]; if(v<bl)bl=v; if(v>bh)bh=v;}
     if(!isFinite(lo)||!isFinite(hi)||!isFinite(bl)||!isFinite(bh))throw new Error('가격 범위 계산 오류');
     var pad=(hi-lo)*0.06||1;
@@ -460,8 +468,6 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
       'xaxis.tickvals':tv,'xaxis.ticktext':tt,'xaxis2.tickvals':tv,'xaxis2.ticktext':tt};
     var p=Plotly.relayout(gd,lay);
     if(p&&p.then)p.then(null,showErr);
-    var mk2=span<=40;                        // 확대했을 때는 일별 점을 표시
-    if(mk2!==markersOn){markersOn=mk2; Plotly.restyle(gd,{mode:mk2?'lines+markers':'lines','marker.size':4},[0]);}
   }
   function render(){
     pending=false;
@@ -637,7 +643,7 @@ def finish(fig, low_label):
     # 범례(차트 위 한 줄)
     fig.add_annotation(xref="paper", yref="paper", x=0.0, y=1.0, xanchor="left", yanchor="bottom",
                        showarrow=False, font=dict(size=11),
-                       text=('<span style="color:#111111">━ 수정종가</span>  '
+                       text=('<span style="color:#e5484d">▮</span><span style="color:#3b6fd4">▮</span> <span style="color:#111111">수정종가 캔들</span>  '
                              '<span style="color:#111111">━ 곡선</span>  '
                              '<span style="color:#1a56db">━ 상한</span>  '
                              '<span style="color:#e5484d">━ 하한</span>'))
@@ -647,6 +653,7 @@ def finish(fig, low_label):
                        text=low_label, font=dict(size=11, color="#555"))
     fig.update_layout(height=620, margin=dict(l=4, r=58, t=(78 if idx_arr is not None else 26), b=22),
                       showlegend=False, bargap=0.05, hovermode=False, dragmode=False,
+                      xaxis_rangeslider_visible=False, xaxis2_rangeslider_visible=False,
                       plot_bgcolor="white", paper_bgcolor="white")
     return fig
 
@@ -659,13 +666,13 @@ def show(fig, div_id, bars):
     dump = lambda o: json.dumps(o, separators=(",", ":"))
     idx_json = dump(pack(idx_scaled)) if idx_scaled is not None else "null"
     raw_json = dump(pack(idx_arr)) if idx_arr is not None else "null"
-    open_json = dump(pack(df["Open"].to_numpy(dtype=float)[sl]))
-    low_json = dump(pack(df["Low"].to_numpy(dtype=float)[sl]))
+    open_json = dump(pack(ov))
+    low_json = dump(pack(lv))
     idx2_json = dump(pack(idx_scaled_p)) if idx_scaled_p is not None else "null"
-    post = "installCrosshair(document.getElementById('{plot_id}'), %d, %s, %s, %s, %d, %s, %s, %s, %s, %d, %s, %d);" % (
+    post = "installCrosshair(document.getElementById('{plot_id}'), %d, %s, %s, %s, %d, %s, %s, %s, %s, %d, %s, %d, %s);" % (
         init_span, dump(series), dump(pack(bars)),
         idx_json, (4 if idx_scaled is not None else -1), json.dumps(idx_name),
-        raw_json, open_json, low_json, n - init_span, idx2_json, 5)
+        raw_json, open_json, low_json, n - init_span, idx2_json, 5, dump(pack(hv)))
     html = "<script>" + CROSSHAIR_JS + "</script>" + fig.to_html(
         full_html=False, include_plotlyjs="cdn", div_id=div_id,
         config={"staticPlot": True, "responsive": True},
