@@ -366,8 +366,10 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
     var D0=focus;
     ud.innerHTML='곡선추세상한 <span style="color:#e5484d">'+pxs(S[2][D0])+'</span> · 곡선추세하한 <span style="color:#3b4fe0">'+pxs(S[3][D0])+'</span>';
     ud.style.display='block';
-    try{var hs=window.parent.document.querySelectorAll('[data-ul]');
-      for(var q=0;q<hs.length;q++){hs[q].querySelector('[data-k=u]').textContent=pxs(S[2][D0]); hs[q].querySelector('[data-k=l]').textContent=pxs(S[3][D0]);}}catch(e2){}
+    try{
+      var su=window.parent.document.querySelectorAll('[data-k=u]'), sl2=window.parent.document.querySelectorAll('[data-k=l]');
+      for(var q=0;q<su.length;q++)su[q].textContent=pxs(S[2][D0]);
+      for(var q2=0;q2<sl2.length;q2++)sl2[q2].textContent=pxs(S[3][D0]);}catch(e2){}
     if(!IDX)return;
     var R=IDXRAW||IDX, D=focus, d, band, row2, unit;
     if(COMPARE_MODE==='daily' && D>=1){
