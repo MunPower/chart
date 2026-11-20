@@ -253,6 +253,10 @@ if idx_arr is not None:     # 지수 데이터가 종목보다 며칠 일찍 끝
 idx_scaled = None
 if idx_arr is not None:     # 처음 열었을 때 맨 왼쪽 종가에 한 번만 맞춘 뒤 고정 (밀거나 확대해도 변하지 않음)
     idx_scaled = idx_arr * (yv[n - init_span] / idx_arr[n - init_span])
+PHONE_SPAN_PY = min(42, init_span)
+idx_scaled_p = None
+if idx_scaled is not None:  # 폰은 처음 2달치만 보이므로 그 맨 왼쪽 종가에 맞춘 지수선도 따로 준비
+    idx_scaled_p = idx_arr * (yv[n - PHONE_SPAN_PY] / idx_arr[n - PHONE_SPAN_PY])
 
 # ───────────── 상단 시세 헤더 ─────────────
 last, prev = y[-1], y[-2]
@@ -325,10 +329,13 @@ def base_traces(fig):
     if idx_scaled is not None:   # 4번 트레이스: 지수(녹색 점선)
         fig.add_trace(go.Scatter(x=dates, y=idx_scaled, name=idx_name,
                                  line=dict(color="#00a651", width=3, dash="dot")), row=1, col=1)
+        if idx_scaled_p is not None:   # 5번 트레이스: 폰용 지수선(처음엔 숨김, 폰이면 JS가 이것으로 교체)
+            fig.add_trace(go.Scatter(x=dates, y=idx_scaled_p, name=idx_name, visible=False, showlegend=False,
+                                     line=dict(color="#00a651", width=3, dash="dot")), row=1, col=1)
 
 
 CROSSHAIR_JS = """
-function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LOW, ANCH){
+function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LOW, ANCH, IDX2, IT2){
   var LP_MS=500;           // 길게 눌러 진동이 오기까지의 시간(ms)
   var CROSS_DELAY_MS=150;  // 진동 후 십자선이 나타나기까지의 시간(ms) (진동 → 십자선 순서 맞춤)
   var PAN_GAIN=1.5;        // 손가락 이동 속도 배율
@@ -353,23 +360,16 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
   function clampSpan(v){return Math.round(Math.max(MINS,Math.min(MAXS,v)));}
   function clampI0(v,sp){return Math.round(Math.max(0,Math.min(N-sp,v)));}
   // 핸드폰(화면 폭 600px 이하)은 처음에 약 2달(42거래일)만 확대해서 보여줌. PC는 그대로.
-  var PHONE_SPAN=42;
+  var PHONE_SPAN=42, ITa=IT;
   var isPhone=false;
   try{ isPhone=Math.min(window.screen&&window.screen.width||9999, window.innerWidth||9999)<=600; }catch(e0){}
-  if(isPhone && initSpan>PHONE_SPAN){
-    var span0=initSpan;
-    try{
-      var a0=N-PHONE_SPAN, f0=(IDX&&S[0]&&IDX[a0])?S[0][a0]/IDX[a0]:1;
-      if(IDX&&isFinite(f0)&&f0>0){            // 지수선을 새 맨 왼쪽 종가에 맞춰 다시 환산
-        var NI=new Array(N);
-        for(var z=0;z<N;z++)NI[z]=IDX[z]*f0;
-        IDX=NI;
-        var pr0=Plotly.restyle(gd,{y:[NI]},[IT]);
-        if(pr0&&pr0.then)pr0.then(null,function(){});
-      }
-      initSpan=PHONE_SPAN;
-    }catch(e1){ initSpan=span0; }          // 문제가 생기면 기존(PC와 같은) 화면으로
-  }
+  if(isPhone && initSpan>PHONE_SPAN && IDX && IDX2 && IDX2.length===N){
+    try{   // 폰: 2달치 기준으로 미리 환산해 둔 지수선으로 교체(보이기/숨기기만 사용)
+      IDX=IDX2; ITa=IT2; initSpan=PHONE_SPAN;
+      var pr0=Plotly.restyle(gd,{visible:[false]},[IT]); if(pr0&&pr0.then)pr0.then(null,function(){});
+      var pr1=Plotly.restyle(gd,{visible:[true]},[IT2]); if(pr1&&pr1.then)pr1.then(null,function(){});
+    }catch(e1){}
+  } else if(isPhone && initSpan>PHONE_SPAN){ initSpan=PHONE_SPAN; }
   var span=clampSpan(initSpan), i0=N-span;
   var pending=false, mode=null, timer=null, sx=0, sy=0, startI0=0, lastT=null, mdown=false, pinch=null, markersOn=null;
   var tStart=0, lastTap=0, lastTouch=0;
@@ -470,7 +470,7 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
       showErr(e);
       if(IDX){
         IDX=null; sm.style.display='none'; if(tg)tg.style.display='none';
-        try{ Plotly.restyle(gd,{visible:[false]},[IT]); }catch(e1){}
+        try{ Plotly.restyle(gd,{visible:[false]},[ITa]); }catch(e1){}
         try{ draw(); }catch(e2){ showErr(e2); }
       }
     }
@@ -530,7 +530,7 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
   btn('＋',92,function(){zoomBy(0.6);});
   btn('－',62,function(){zoomBy(1/0.6);});
   if(IDX){                                  // 지수 비교선 켜기/끄기 버튼 (버튼 글자 = 지수 이름)
-    tg=btn(IDXNAME,124,function(){idxOn=!idxOn; paintTg(); try{Plotly.restyle(gd,{visible:[idxOn]},[IT]);}catch(e){showErr(e);} schedule();},46,12);
+    tg=btn(IDXNAME,124,function(){idxOn=!idxOn; paintTg(); try{Plotly.restyle(gd,{visible:[idxOn]},[ITa]);}catch(e){showErr(e);} schedule();},46,12);
     var paintTg=function(){tg.style.color=idxOn?'#007a3d':'#999'; tg.style.background=idxOn?'#e8f8ef':'#f3f3f3'; tg.style.borderColor=idxOn?'#00a651':'#ccc';};
     paintTg();
   }
@@ -660,10 +660,11 @@ def show(fig, div_id, bars):
     raw_json = dump(pack(idx_arr)) if idx_arr is not None else "null"
     open_json = dump(pack(df["Open"].to_numpy(dtype=float)[sl]))
     low_json = dump(pack(df["Low"].to_numpy(dtype=float)[sl]))
-    post = "installCrosshair(document.getElementById('{plot_id}'), %d, %s, %s, %s, %d, %s, %s, %s, %s, %d);" % (
+    idx2_json = dump(pack(idx_scaled_p)) if idx_scaled_p is not None else "null"
+    post = "installCrosshair(document.getElementById('{plot_id}'), %d, %s, %s, %s, %d, %s, %s, %s, %s, %d, %s, %d);" % (
         init_span, dump(series), dump(pack(bars)),
         idx_json, (4 if idx_scaled is not None else -1), json.dumps(idx_name),
-        raw_json, open_json, low_json, n - init_span)
+        raw_json, open_json, low_json, n - init_span, idx2_json, 5)
     html = "<script>" + CROSSHAIR_JS + "</script>" + fig.to_html(
         full_html=False, include_plotlyjs="cdn", div_id=div_id,
         config={"staticPlot": True, "responsive": True},
