@@ -355,6 +355,8 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
   var COMPARE_MODE='level'; // 'level'=그날 종목 가격과 그날 지수선(녹색 점선) 비교, 'daily'=그날 등락률끼리 비교
   var SAME_BAND_LEVEL=2;    // level: 가격 차이가 ±2% 이내면 '보합'
   var SAME_BAND_DAILY=0.3;  // daily: 등락률 차이가 ±0.3%p 이내면 '보합'
+  var RPAD_RATIO=0.08;     // 오른쪽 여백: 보이는 기간의 8%만큼 빈 칸 (120일 → 약 10칸, 폰 42일 → 약 3칸)
+  var RPAD_MIN=3;          // 오른쪽 여백 최소 칸 수
   var idxOn=true;          // 지수 비교선 표시 여부
   // 브라우저(앱 브라우저)가 두 손가락으로 화면 전체를 확대하지 못하게 막기
   try{
@@ -498,7 +500,8 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
     var pad=(hi-lo)*0.06||1;
     var step=Math.max(3,Math.round(span/4)), tv=[], tt=[], idx;
     for(idx=N-1;idx>=a;idx-=step){tv.push(cats[idx]); tt.push(fmt(cats[idx]));}
-    var xr=[i0-0.5,i0+span-0.5];
+    var rp=Math.max(RPAD_MIN,Math.round(span*RPAD_RATIO));   // 오늘 캔들이 오른쪽 끝에 붙지 않게 빈 칸 추가
+    var xr=[i0-0.5,i0+span-0.5+rp];
     var lay={'xaxis.range':xr,'xaxis2.range':xr,
       'yaxis.range':[lo-pad,hi+pad],'yaxis2.range':[bl*1.1,(bh*1.1)||1],
       'xaxis.tickvals':tv,'xaxis.ticktext':tt,'xaxis2.tickvals':tv,'xaxis2.ticktext':tt};
