@@ -304,11 +304,13 @@ st.markdown(
     '.hd-lines{display:flex;flex-direction:column;gap:10px}'
     '.hd-lbl{font-size:15px;color:#111;line-height:1.4;text-align:center;white-space:nowrap}'
     '.hd-sig{font-size:24px;font-weight:800;line-height:1.2;white-space:nowrap}'
+    '.hd-wrap{display:flex;align-items:flex-end;justify-content:space-between;gap:8px 16px;flex-wrap:wrap}'
+    '.cv-box{margin-left:auto;padding-right:4px;padding-bottom:2px}'
     '@media (max-width:600px){'
     '.hd-row{gap:10px}.hd-big{font-size:30px}.hd-chg{font-size:14px}'
-    '.hd-lbl{font-size:12px}.hd-sig{font-size:17px}}'
+    '.hd-lbl{font-size:12px}.hd-sig{font-size:17px}.cv-box{margin-left:0;width:100%}}'
     '</style>'
-    '<div class="hd-row">'
+    '<div class="hd-wrap"><div class="hd-row">'
     '<div>'
     f'<div class="hd-px"><span class="hd-big" style="color:{col}">{last:,.0f}</span>'
     f'<span class="hd-chg" style="color:{col}">{arrow} {abs(chg):,.0f} &nbsp; {pct:+.2f}%</span></div>'
@@ -319,7 +321,7 @@ st.markdown(
     f'<div class="hd-lbl" data-ul="1" style="color:#e5484d;font-weight:600">매수선<br>(<span data-k="l">{_lo:,.0f}</span>)</div>'
     '</div>'
     f'{_sig}'
-    '</div>',
+    '</div><div class="cv-box"></div></div>',      # cv-box: 차트가 비교 정보·범례·버튼을 여기에 채움
     unsafe_allow_html=True)
 
 # ───────────── 차트 ─────────────
@@ -354,8 +356,6 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
   var SAME_BAND_LEVEL=2;    // level: 가격 차이가 ±2% 이내면 '보합'
   var SAME_BAND_DAILY=0.3;  // daily: 등락률 차이가 ±0.3%p 이내면 '보합'
   var idxOn=true;          // 지수 비교선 표시 여부
-  var RPAD_RATIO=0.08;     // 오른쪽 여백: 보이는 기간의 8%만큼 빈 칸 (120일 → 약 10칸, 폰 42일 → 약 3칸)
-  var RPAD_MIN=3;          // 오른쪽 여백 최소 칸 수
   // 브라우저(앱 브라우저)가 두 손가락으로 화면 전체를 확대하지 못하게 막기
   try{
     var pd=window.parent.document, mv=pd.querySelector('meta[name=viewport]');
@@ -395,10 +395,44 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
   var dl=mk(lab+'transform:translateX(-50%);white-space:pre;text-align:center;line-height:1.3;');   // 날짜 + (가격 , 지수) 두 줄
   var pr=mk(lab+'width:50px;transform:translateY(-50%);');
   function f2(v){return Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
-  var sm=mk('left:4px;top:6px;font:600 12px sans-serif;white-space:nowrap;');   // 지수 대비 요약
-  var dt=mk('left:4px;top:24px;font:11px sans-serif;color:#666;white-space:nowrap;');   // 계산 근거(기준일부터의 수익률)
-  var ig=mk('left:4px;top:40px;font:600 11px sans-serif;color:#00a651;white-space:nowrap;');   // 지수 값(녹색)
+  // 오른쪽 위 상자: 비교 요약 3줄 → 범례 + [지수][＋][－] 버튼
+  // 위쪽 시세 줄 오른쪽 빈자리(cv-box)에 넣음. 못 찾으면 차트 오른쪽 위에 표시
+  var HD=document, host=null;
+  try{ host=window.parent.document.querySelector('.cv-box'); if(host){HD=window.parent.document; host.innerHTML='';} }catch(eh){host=null; HD=document;}
+  // 상자 = [글씨 칸(비교 요약·범례)] + [버튼 칸]. 버튼 칸은 오른쪽 끝에 따로 고정 → 글씨 길이가 바뀌어도 버튼은 안 움직임
+  var outer=HD.createElement('div');
+  outer.style.cssText=(host?'':'position:absolute;top:2px;right:4px;z-index:55;')+'max-width:100%;'
+    +'display:flex;align-items:flex-end;justify-content:flex-end;gap:14px;';
+  (host||gd).appendChild(outer);
+  var box=HD.createElement('div');
+  box.style.cssText='display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;';
+  outer.appendChild(box);
+  var bcol=HD.createElement('div');
+  bcol.style.cssText='display:flex;align-items:center;gap:6px;flex:none;';
+  outer.appendChild(bcol);
+  function bk(css){var d=HD.createElement('div'); d.style.cssText='display:none;'+css; box.appendChild(d); return d;}
+  var sm=bk('font:600 12px sans-serif;white-space:nowrap;');                 // 지수 대비 요약
+  var dt=bk('font:11px sans-serif;color:#666;white-space:normal;word-break:keep-all;line-height:1.35;');   // 줄바꿈은 띄어쓰기에서만   // 시가·저가·종가·지수
+  var ig=bk('font:600 11px sans-serif;color:#00a651;white-space:nowrap;');   // 지수 값(녹색)
   if(IDX){sm.style.display='block'; dt.style.display='block'; ig.style.display='block';}
+  var brow=HD.createElement('div');
+  brow.style.cssText='margin-top:2px;line-height:1.35;';
+  brow.innerHTML='<span style="font:11px sans-serif;color:#111;white-space:nowrap;margin-right:4px">'
+    +'<span style="color:#e5484d">▮</span><span style="color:#3b6fd4">▮</span> 종가 캔들&nbsp; ━ 곡선&nbsp; '
+    +'<span style="color:#1a56db">━ 상한</span>&nbsp; <span style="color:#e5484d">━ 하한</span></span>';
+  box.appendChild(brow);
+  // 폰(폭 600px 이하): 글씨는 오른쪽 끝까지 넓게 쓰고, 맨 아래 줄은 [범례 ……… 버튼]으로 배치
+  var narrow=false;
+  try{ narrow=Math.min(window.screen&&window.screen.width||9999, (HD.defaultView||window).innerWidth||9999)<=600; }catch(en){}
+  if(narrow){
+    outer.style.flexDirection='column'; outer.style.alignItems='stretch'; outer.style.gap='4px';
+    box.style.width='100%';
+    var lastRow=HD.createElement('div');
+    lastRow.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;';
+    outer.appendChild(lastRow);
+    lastRow.appendChild(brow); lastRow.appendChild(bcol);
+    brow.style.marginTop='0';
+  }
   var focus=N-1;           // 십자선이 가리키는 날짜(없으면 맨 오른쪽=최근)
   function sg(v){return (v>=0?'+':'')+v.toFixed(1)+'%';}
   function md(i){return cats[i].slice(5);}
@@ -464,8 +498,7 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
     var pad=(hi-lo)*0.06||1;
     var step=Math.max(3,Math.round(span/4)), tv=[], tt=[], idx;
     for(idx=N-1;idx>=a;idx-=step){tv.push(cats[idx]); tt.push(fmt(cats[idx]));}
-    var rp=Math.max(RPAD_MIN,Math.round(span*RPAD_RATIO));   // 오늘 캔들이 오른쪽 끝에 붙지 않게 빈 칸 추가
-    var xr=[i0-0.5,i0+span-0.5+rp];
+    var xr=[i0-0.5,i0+span-0.5];
     var lay={'xaxis.range':xr,'xaxis2.range':xr,
       'yaxis.range':[lo-pad,hi+pad],'yaxis2.range':[bl*1.1,(bh*1.1)||1],
       'xaxis.tickvals':tv,'xaxis.ticktext':tt,'xaxis2.tickvals':tv,'xaxis2.ticktext':tt};
@@ -478,7 +511,7 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
     catch(e){                                // 지수 부분에서 문제가 생겨도 차트는 계속 그리도록 지수 기능만 끔
       showErr(e);
       if(IDX){
-        IDX=null; sm.style.display='none'; if(tg)tg.style.display='none';
+        IDX=null; sm.style.display='none'; dt.style.display='none'; ig.style.display='none'; if(tg)tg.style.display='none';
         try{ Plotly.restyle(gd,{visible:[false]},[ITa]); }catch(e1){}
         try{ draw(); }catch(e2){ showErr(e2); }
       }
@@ -524,25 +557,25 @@ function installCrosshair(gd, initSpan, S, B, IDX, IT, IDXNAME, IDXRAW, OPEN, LO
     span=ns; i0=clampI0(c-ns/2,ns); hide(); schedule();
   }
 
-  // ── 확대/축소 버튼 (두 손가락 확대가 막히는 폰용) ──
-  function btn(txt,right,fn,w,fs){
-    var b=document.createElement('div'); b.textContent=txt;
-    b.style.cssText='position:absolute;top:2px;right:'+right+'px;width:'+(w||28)+'px;height:22px;line-height:22px;text-align:center;'
-      +'font:600 '+(fs||15)+'px sans-serif;background:#f3f3f3;border:1px solid #ccc;border-radius:4px;z-index:60;cursor:pointer;'
+  // ── 버튼: [지수][＋][－] (오른쪽 끝 고정) ──
+  function btn(txt,fn,w,fs){
+    var b=HD.createElement('div'); b.textContent=txt;
+    b.style.cssText=(w?'padding:0 10px;':'width:32px;')+'height:28px;line-height:28px;text-align:center;white-space:nowrap;'
+      +'font:600 '+(fs||16)+'px sans-serif;background:#f3f3f3;border:1px solid #ccc;border-radius:5px;cursor:pointer;'
       +'touch-action:manipulation;user-select:none;-webkit-user-select:none;';
     ['touchstart','touchmove','touchend','mousedown','mousemove','dblclick'].forEach(function(n){
       b.addEventListener(n,function(e){e.stopPropagation();},{passive:true});});
     b.addEventListener('click',function(e){e.stopPropagation();fn();});
-    gd.appendChild(b);
+    bcol.appendChild(b);
     return b;
   }
-  btn('＋',92,function(){zoomBy(0.6);});
-  btn('－',62,function(){zoomBy(1/0.6);});
   if(IDX){                                  // 지수 비교선 켜기/끄기 버튼 (버튼 글자 = 지수 이름)
-    tg=btn(IDXNAME,124,function(){idxOn=!idxOn; paintTg(); try{Plotly.restyle(gd,{visible:[idxOn]},[ITa]);}catch(e){showErr(e);} schedule();},46,12);
+    tg=btn(IDXNAME,function(){idxOn=!idxOn; paintTg(); try{Plotly.restyle(gd,{visible:[idxOn]},[ITa]);}catch(e){showErr(e);} schedule();},1,14);
     var paintTg=function(){tg.style.color=idxOn?'#007a3d':'#999'; tg.style.background=idxOn?'#e8f8ef':'#f3f3f3'; tg.style.borderColor=idxOn?'#00a651':'#ccc';};
     paintTg();
   }
+  btn('＋',function(){zoomBy(0.6);});
+  btn('－',function(){zoomBy(1/0.6);});
 
   // ── 손가락 ──
   // 바로 좌우로 밀기=기간 이동(한 칸씩 딱딱하게) / 길게 눌러 진동=십자선 / 두 손가락=확대·축소
@@ -632,29 +665,23 @@ def finish(fig, low_label):
                      ticktext=[pd.to_datetime(dates[i]).strftime("%m.%d") for i in pos],
                      tickangle=0, tickfont=dict(size=11, color="#555"),
                      showgrid=True, gridcolor="#f0b8b8", gridwidth=1,
-                     showline=False, zeroline=False)
+                     showline=True, mirror=True, linecolor="#9aa3ae", linewidth=1, zeroline=False)   # 차트 영역 테두리
     fig.update_xaxes(showticklabels=True, row=1, col=1)    # 날짜는 위 차트 아래(두 차트 사이)에 표시
     fig.update_xaxes(showticklabels=False, row=2, col=1)
     fig.update_yaxes(side="right", tickformat=",.0f", tickfont=dict(size=11, color="#555"),
-                     showgrid=True, gridcolor="#eeeeee", zeroline=False, showline=False, ticks="")
+                     showgrid=True, gridcolor="#eeeeee", zeroline=False, ticks="",
+                     showline=True, mirror=True, linecolor="#9aa3ae", linewidth=1)
     fig.update_yaxes(nticks=4, row=2, col=1)
     tagc = "#e5484d" if chg > 0 else "#3b6fd4"
     # 현재가 태그(오른쪽 축)
     fig.add_annotation(xref="paper", x=1.0, xanchor="left", yref="y", y=yv[-1], showarrow=False,
                        text=f"{last:,.0f}<br>{pct:+.2f}%", align="left", borderpad=2,
                        font=dict(color="white", size=11), bgcolor=tagc)
-    # 범례(차트 위 한 줄)
-    fig.add_annotation(xref="paper", yref="paper", x=0.0, y=1.0, xanchor="left", yanchor="bottom",
-                       showarrow=False, font=dict(size=11),
-                       text=('<span style="color:#e5484d">▮</span><span style="color:#3b6fd4">▮</span> <span style="color:#111111">수정종가 캔들</span>  '
-                             '<span style="color:#111111">━ 곡선</span>  '
-                             '<span style="color:#1a56db">━ 상한</span>  '
-                             '<span style="color:#e5484d">━ 하한</span>'))
     # 아래 차트 이름
     fig.add_annotation(xref="paper", yref="paper", x=0.01, y=fig.layout.yaxis2.domain[1],
                        xanchor="left", yanchor="top", showarrow=False,
                        text=low_label, font=dict(size=11, color="#555"))
-    fig.update_layout(height=620, margin=dict(l=4, r=58, t=(78 if idx_arr is not None else 26), b=22),
+    fig.update_layout(height=620, margin=dict(l=4, r=max(66, 12 + 7 * len(f"{last:,.0f}")), t=26, b=22),
                       showlegend=False, bargap=0.05, hovermode=False, dragmode=False,
                       xaxis_rangeslider_visible=False, xaxis2_rangeslider_visible=False,
                       plot_bgcolor="white", paper_bgcolor="white")
